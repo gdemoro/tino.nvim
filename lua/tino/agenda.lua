@@ -93,6 +93,16 @@ function M.jump(bufnr)
   return true
 end
 
+local function source_label(path, lines)
+  for row, line in ipairs(lines) do
+    local title = line:match("^ ? ? ?#[ \t]+(.-)%s*$")
+    if title and title ~= "" and not parser.row_fenced(lines, row - 1) then
+      return (title:gsub("[ \t]+#+$", ""))
+    end
+  end
+  return vim.fn.fnamemodify(path, ":t")
+end
+
 local function render(config)
   local errors
   local filepaths
@@ -100,13 +110,14 @@ local function render(config)
   local include_completed = config.agenda and config.agenda.include_completed == true
 
   -- file path -> list of parsed task rows
-  local per_file = {}
+  local per_file, labels = {}, {}
   for _, path in ipairs(filepaths) do
     local lines, err = files.read_lines(path)
     if not lines then
       errors[#errors + 1] = { path = path, message = tostring(err) }
     else
       per_file[path] = parser.scan_lines(lines, config)
+      labels[path] = source_label(path, lines)
     end
   end
 
@@ -124,7 +135,7 @@ local function render(config)
             if task.state == state then
               local prefix = task.priority and ("[#" .. task.priority .. "] ") or ""
               local deadline = task.due_date and (" @due(" .. task.due_date .. ")") or ""
-              local text = "  " .. path .. ":" .. (item.row + 1) .. "  " .. prefix .. task.text .. deadline
+              local text = "  " .. labels[path] .. ":" .. (item.row + 1) .. "  " .. prefix .. task.text .. deadline
               out[#out + 1] = text
               map[#out] = { file = path, lnum = item.row + 1, text = item.line }
             end
@@ -157,7 +168,7 @@ function M.run()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
   vim.bo[buf].readonly = true
-  vim.bo[buf].filetype = "tino-agenda"
+  vim.bo[buf].filetype = "markdown"
   pcall(vim.api.nvim_buf_set_name, buf, "tino-agenda")
 
   targets[buf] = map
