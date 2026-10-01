@@ -6,6 +6,7 @@ local files = require("tino.files")
 local M = {}
 
 local targets = {} -- bufnr -> { [agenda_line] = { file, lnum, text } }
+local metadata_ns = vim.api.nvim_create_namespace("tino-agenda-metadata")
 
 local function notify(msg, level)
   vim.notify("tino: " .. msg, level or vim.log.levels.INFO)
@@ -134,10 +135,12 @@ local function render(config)
             local task = item.task
             if task.state == state then
               local prefix = task.priority and ("[#" .. task.priority .. "] ") or ""
-              local deadline = task.due_date and (" @due(" .. task.due_date .. ")") or ""
-              local text = "  " .. labels[path] .. ":" .. (item.row + 1) .. "  " .. prefix .. task.text .. deadline
-              out[#out + 1] = text
-              map[#out] = { file = path, lnum = item.row + 1, text = item.line }
+              local deadline = task.due_date and ("  @due(" .. task.due_date .. ")") or ""
+              local target = { file = path, lnum = item.row + 1, text = item.line }
+              out[#out + 1] = "  " .. prefix .. task.text
+              map[#out] = target
+              out[#out + 1] = "    " .. labels[path] .. ":" .. (item.row + 1) .. deadline
+              map[#out] = target
             end
           end
         end
@@ -170,6 +173,13 @@ function M.run()
   vim.bo[buf].readonly = true
   vim.bo[buf].filetype = "markdown"
   pcall(vim.api.nvim_buf_set_name, buf, "tino-agenda")
+  for row, line in ipairs(lines) do
+    if line:sub(1, 4) == "    " then
+      vim.api.nvim_buf_set_extmark(buf, metadata_ns, row - 1, 0, {
+        end_col = #line, hl_group = "Comment", priority = 200,
+      })
+    end
+  end
 
   targets[buf] = map
 
