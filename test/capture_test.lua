@@ -17,13 +17,14 @@ end
 
 local function with_input(queue, fn)
   local orig = vim.ui.input
-  local i = 0
-  vim.ui.input = function(_, cb)
+  local i, prompts = 0, {}
+  vim.ui.input = function(opts, cb)
     i = i + 1
+    prompts[i] = opts.prompt
     local v = queue[i]
     cb(v)
   end
-  local ok, err = pcall(fn)
+  local ok, err = pcall(fn, prompts)
   vim.ui.input = orig
   if not ok then
     error(err, 2)
@@ -51,7 +52,7 @@ H.describe("capture", function()
     local dir = util.reset("capture_basic")
     local inbox = dir .. "/inbox.md"
     set_config(inbox)
-    with_input({ "Buy milk", "" }, function()
+    with_input({ "Buy milk", "", "" }, function()
       capture.run()
     end)
     local lines = buf_lines(inbox)
@@ -64,10 +65,66 @@ H.describe("capture", function()
     local dir = util.reset("capture_priority")
     local inbox = dir .. "/inbox.md"
     set_config(inbox)
-    with_input({ "Ship release", "A" }, function()
+    with_input({ "Ship release", "A", "" }, function()
       capture.run()
     end)
     H.assert(vim.deep_equal(buf_lines(inbox), { "- [ ] TODO [#A] Ship release" }))
+  end)
+
+  H.it("prompts text then priority then due, normalizing all deadline formats", function()
+    local dates = require("tino.date")
+    for i, input in ipairs({ "2024-02-29", "today", "tomorrow", "+2d", "+1w" }) do
+      local dir = util.reset("capture_due_" .. i)
+      local inbox = dir .. "/inbox.md"
+      set_config(inbox)
+      with_input({ "café  task", "B", input }, function(prompts)
+        capture.run()
+        H.eq(#prompts, 3)
+        H.eq(prompts[1], "Task: ")
+        H.assert(prompts[2]:find("Priority", 1, true))
+        H.assert(prompts[3]:find("Due", 1, true))
+      end)
+      H.assert(vim.deep_equal(buf_lines(inbox), {
+        "- [ ] TODO [#B] café  task @due(" .. dates.normalize(input) .. ")",
+      }), vim.inspect(buf_lines(inbox)))
+      H.eq(util.read(inbox), nil, "still unsaved")
+    end
+  end)
+
+  H.it("cancels capture when the due prompt is cancelled", function()
+    local dir = util.reset("capture_cancel_due")
+    local inbox = dir .. "/inbox.md"
+    set_config(inbox)
+    with_input({ "Task", "A" }, function(prompts)
+      capture.run()
+      H.eq(#prompts, 3, "third prompt cancelled with nil")
+    end)
+    H.eq(vim.fn.bufnr(inbox), -1)
+    H.eq(util.read(inbox), nil)
+  end)
+
+  H.it("rejects invalid deadlines without changing or opening the inbox", function()
+    local dir = util.reset("capture_bad_due")
+    local inbox = util.write(dir .. "/inbox.md", "- [ ] TODO keep\n")
+    set_config(inbox)
+    with_input({ "New task", "", "2024-02-30" }, function()
+      capture.run()
+    end)
+    H.eq(vim.fn.bufnr(inbox), -1)
+    H.eq(util.read(inbox), "- [ ] TODO keep\n")
+    H.eq(capture.insert(inbox, md.config, "New", nil, "+1m"), false)
+    H.eq(util.read(inbox), "- [ ] TODO keep\n")
+  end)
+
+  H.it("refuses deadline metadata hidden in the capture description", function()
+    local dir = util.reset("capture_ambiguous_due")
+    local inbox = dir .. "/inbox.md"
+    set_config(inbox)
+    with_input({ "Task @due(2024-02-29)", "", "" }, function()
+      capture.run()
+    end)
+    H.eq(vim.fn.bufnr(inbox), -1)
+    H.eq(util.read(inbox), nil)
   end)
 
   H.it("preserves existing inbox contents", function()
@@ -75,7 +132,7 @@ H.describe("capture", function()
     local inbox = dir .. "/inbox.md"
     util.write(inbox, "- [ ] TODO existing\n\nsome notes\n")
     set_config(inbox)
-    with_input({ "New task", "" }, function()
+    with_input({ "New task", "", "" }, function()
       capture.run()
     end)
     local lines = buf_lines(inbox)
@@ -88,7 +145,7 @@ H.describe("capture", function()
     local dir = util.reset("capture_newfile")
     local inbox = dir .. "/inbox.md"
     set_config(inbox)
-    with_input({ "Fresh", "" }, function()
+    with_input({ "Fresh", "", "" }, function()
       capture.run()
     end)
     H.eq(vim.api.nvim_buf_get_name(0), vim.fn.fnamemodify(inbox, ":p"))
@@ -111,10 +168,10 @@ H.describe("capture", function()
     local inbox = dir .. "/inbox.md"
     util.write(inbox, "- [ ] TODO keep\n")
     set_config(inbox)
-    with_input({ "   ", "" }, function()
+    with_input({ "   ", "", "" }, function()
       capture.run()
     end)
-    with_input({ "line one\nline two", "" }, function()
+    with_input({ "line one\nline two", "", "" }, function()
       capture.run()
     end)
     H.assert(vim.deep_equal(buf_lines(inbox), { "- [ ] TODO keep" }))
@@ -125,7 +182,7 @@ H.describe("capture", function()
     local inbox = dir .. "/inbox.md"
     util.write(inbox, "- [ ] TODO keep\n")
     set_config(inbox)
-    with_input({ "Task", "Z" }, function()
+    with_input({ "Task", "Z", "" }, function()
       capture.run()
     end)
     H.assert(vim.deep_equal(buf_lines(inbox), { "- [ ] TODO keep" }))
@@ -148,10 +205,10 @@ H.describe("capture", function()
     local dir = util.reset("capture_stale")
     local inbox = dir .. "/inbox.md"
     set_config(inbox)
-    with_input({ "first", "" }, function()
+    with_input({ "first", "", "" }, function()
       capture.run()
     end)
-    with_input({ "second", "" }, function()
+    with_input({ "second", "", "" }, function()
       capture.run()
     end)
     H.assert(vim.deep_equal(buf_lines(inbox), { "- [ ] TODO first", "- [ ] TODO second" }))
@@ -211,7 +268,7 @@ H.describe("capture", function()
       inbox = inbox,
       agenda = { include_completed = false },
     }
-    with_input({ "Custom task", "H" }, function()
+    with_input({ "Custom task", "H", "" }, function()
       capture.run()
     end)
     H.assert(vim.deep_equal(buf_lines(inbox), { "- [ ] OPEN [#H] Custom task" }))
@@ -259,7 +316,7 @@ H.describe("capture", function()
     local inbox = dir .. "/inbox.md"
     util.write(inbox, "- [ ] TODO keep\n")
     set_config(inbox)
-    with_input({ "[#A] buy milk", "" }, function()
+    with_input({ "[#A] buy milk", "", "" }, function()
       capture.run()
     end)
     H.assert(vim.deep_equal(buf_lines(inbox), { "- [ ] TODO keep" }))
@@ -271,7 +328,7 @@ H.describe("capture", function()
     local inbox = dir .. "/inbox.md"
     util.write(inbox, "- [ ] TODO keep\n")
     set_config(inbox)
-    with_input({ "write docs @done(2024-05-01 09:30)", "" }, function()
+    with_input({ "write docs @done(2024-05-01 09:30)", "", "" }, function()
       capture.run()
     end)
     H.assert(vim.deep_equal(buf_lines(inbox), { "- [ ] TODO keep" }))
@@ -283,7 +340,7 @@ H.describe("capture", function()
     local inbox = dir .. "/inbox.md"
     util.write(inbox, "- [ ] TODO keep\n")
     set_config(inbox)
-    with_input({ "[#A] ship release", "A" }, function()
+    with_input({ "[#A] ship release", "A", "" }, function()
       capture.run()
     end)
     H.assert(vim.deep_equal(buf_lines(inbox), { "- [ ] TODO keep" }))
@@ -295,7 +352,7 @@ H.describe("capture", function()
     local inbox = dir .. "/inbox.md"
     set_config(inbox)
     local desc = "café — naïve ✨ 日本語"
-    with_input({ desc, "B" }, function()
+    with_input({ desc, "B", "" }, function()
       capture.run()
     end)
     H.assert(vim.deep_equal(buf_lines(inbox), { "- [ ] TODO [#B] " .. desc }), vim.inspect(buf_lines(inbox)))

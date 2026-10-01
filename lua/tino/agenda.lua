@@ -123,7 +123,8 @@ local function render(config)
             local task = item.task
             if task.state == state then
               local prefix = task.priority and ("[#" .. task.priority .. "] ") or ""
-              local text = "  " .. path .. ":" .. (item.row + 1) .. "  " .. prefix .. task.text
+              local deadline = task.due_date and (" @due(" .. task.due_date .. ")") or ""
+              local text = "  " .. path .. ":" .. (item.row + 1) .. "  " .. prefix .. task.text .. deadline
               out[#out + 1] = text
               map[#out] = { file = path, lnum = item.row + 1, text = item.line }
             end

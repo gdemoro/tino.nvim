@@ -3,6 +3,7 @@
 
 local parser = require("tino.parser")
 local files = require("tino.files")
+local dates = require("tino.date")
 local M = {}
 
 local function notify(msg, level)
@@ -23,12 +24,16 @@ local function valid_priority(config, p)
 end
 
 -- Build the canonical first-active-state task line.
-function M.build_line(config, text, priority)
+function M.build_line(config, text, priority, due_date)
   local line = "- [ ] " .. config.states[1]
   if priority then
     line = line .. " [#" .. priority .. "]"
   end
-  return line .. " " .. text
+  line = line .. " " .. text
+  if due_date and due_date ~= "" then
+    line = line .. " @due(" .. due_date .. ")"
+  end
+  return line
 end
 
 -- Trim and sanity-check a task description before any buffer work. Returns
@@ -52,12 +57,12 @@ local function editable(buf)
     and vim.bo[buf].modifiable
 end
 
--- Insert `text` (with optional priority) into `inbox`, loading the buffer
+-- Insert `text` (with optional priority/deadline) into `inbox`, loading the buffer
 -- without saving and displaying it. Refuses (returning false after a clean
 -- notification) rather than reinterpreting the chosen priority or the task
 -- description as metadata, and never leaves the original inbox content
 -- partially modified.
-function M.insert(inbox, config, text, priority)
+function M.insert(inbox, config, text, priority, due_input)
   local path = files.normalize(inbox)
   if not path then
     notify("invalid inbox path", vim.log.levels.ERROR)
@@ -74,16 +79,24 @@ function M.insert(inbox, config, text, priority)
     return false
   end
 
-  local line = M.build_line(config, text, priority)
+  local due_date, err = dates.normalize(due_input == nil and "" or due_input)
+  if not due_date then
+    notify(err, vim.log.levels.WARN)
+    return false
+  end
+  if due_date == "" then
+    due_date = nil
+  end
+  local line = M.build_line(config, text, priority, due_date)
   local parsed = parser.parse(line, config)
   if not parsed then
     notify("could not build a valid task", vim.log.levels.ERROR)
     return false
   end
   -- The chosen priority and the intended text must survive the round trip
-  -- byte-for-byte: refuse a leading [#P] cookie or trailing @done(...) that
-  -- the parser would otherwise absorb as managed metadata.
-  if parsed.priority ~= priority or parsed.text ~= text then
+  -- byte-for-byte: refuse a leading [#P] cookie or trailing managed metadata
+  -- that the parser would otherwise absorb from the description.
+  if parsed.priority ~= priority or parsed.text ~= text or parsed.due_date ~= due_date then
     notify("task text would be reinterpreted as metadata", vim.log.levels.WARN)
     return false
   end
@@ -176,7 +189,12 @@ function M.run()
         end
         priority = pri
       end
-      M.insert(inbox, config, text, priority)
+      vim.ui.input({ prompt = "Due (YYYY-MM-DD, today, tomorrow, +Nd, +Nw; blank for none): " }, function(due)
+        if due == nil then
+          return -- cancelled
+        end
+        M.insert(inbox, config, text, priority, due)
+      end)
     end)
   end)
 end

@@ -207,6 +207,10 @@ function M._register_commands()
     require("tino.task").set_todo(0, current_row())
   end, { desc = "tino: mark task TODO" })
 
+  vim.api.nvim_create_user_command("TinoDue", function()
+    require("tino.task").prompt_due(0, current_row())
+  end, { desc = "tino: set or remove task deadline" })
+
   local lazy = {
     TinoCapture = "tino.capture",
     TinoAgenda = "tino.agenda",

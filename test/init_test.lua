@@ -117,7 +117,7 @@ H.describe("configuration", function()
 end)
 
 H.describe("command registration", function()
-  local required = { "TinoCycle", "TinoPriority", "TinoDone", "TinoTodo", "TinoCapture", "TinoAgenda", "TinoRefile" }
+  local required = { "TinoCycle", "TinoPriority", "TinoDone", "TinoTodo", "TinoDue", "TinoCapture", "TinoAgenda", "TinoRefile" }
 
   H.it("registers exactly the required commands and no legacy aliases", function()
     fresh_config()
@@ -168,6 +168,7 @@ H.describe("namespace", function()
       "tino",
       "tino.files",
       "tino.parser",
+      "tino.date",
       "tino.task",
       "tino.highlight",
       "tino.capture",
@@ -189,7 +190,7 @@ H.describe("plugin bootstrap", function()
     vim.g.tino_commands_registered = nil
     vim.cmd("source " .. vim.fn.fnameescape(plugin_path))
     H.eq(vim.g.loaded_tino, 1, "bootstrap sets loaded guard")
-    for _, name in ipairs({ "TinoCycle", "TinoPriority", "TinoCapture", "TinoAgenda", "TinoRefile" }) do
+    for _, name in ipairs({ "TinoCycle", "TinoPriority", "TinoDone", "TinoTodo", "TinoDue", "TinoCapture", "TinoAgenda", "TinoRefile" }) do
       H.eq(vim.fn.exists(":" .. name), 2, "bootstrap registers " .. name)
     end
   end)

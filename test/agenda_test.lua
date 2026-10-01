@@ -81,6 +81,25 @@ H.describe("agenda", function()
     H.assert(l:find("description here", 1, true), "description shown")
   end)
 
+  H.it("shows deadlines with priority and description, including completed tasks when enabled", function()
+    local dir = util.reset("agenda_due")
+    util.write(dir .. "/a.md", table.concat({
+      "- [ ] TODO [#A] active @due(2024-02-29)",
+      "- [x] DONE finished @done(2024-02-28 10:30) @due(2024-03-01)",
+      "- [ ] TODO no deadline",
+      "",
+    }, "\n"))
+    set_config({ dir }, true)
+    local buf = agenda.run()
+    local _, active = find_line(buf, "a.md:1")
+    local _, completed = find_line(buf, "a.md:2")
+    local _, plain = find_line(buf, "a.md:3")
+    H.assert(active:find("[#A] active @due(2024-02-29)", 1, true))
+    H.assert(completed:find("finished @due(2024-03-01)", 1, true))
+    H.eq(select(2, active:gsub("@due%(", "")), 1, "deadline shown once")
+    H.assert(not plain:find("@due(", 1, true))
+  end)
+
   H.it("skips fenced code examples", function()
     local dir = util.reset("agenda_fence")
     util.write(dir .. "/a.md", "```\n- [ ] TODO example\n```\n- [ ] TODO real\n")

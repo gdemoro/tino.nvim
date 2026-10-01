@@ -1,12 +1,13 @@
 -- tino parser: pure-Lua, byte-oriented task line grammar.
 --
 -- Grammar (after optional horizontal-whitespace indentation):
---   <marker><ws>+<checkbox><ws>+<STATE>[[#P]]?<ws>+<text>[<ws>+@done(YYYY-MM-DD HH:MM)]<ws>*
+--   <marker><ws>+<checkbox><ws>+<STATE>[[#P]]?<ws>+<text>[<ws>+<metadata>]*<ws>*
 --   marker   : "-", "*", "+" or one-or-more digits followed by "." or ")"
 --   checkbox : "[ ]" | "[x]" | "[X]"
 --   STATE    : exactly one configured uppercase token [A-Z][A-Z0-9_-]*
 --   [#P]     : optional single configured uppercase-letter priority cookie
---   @done(..): optional single canonical trailing completion timestamp
+--   metadata : optional single @due(YYYY-MM-DD) and/or @done(YYYY-MM-DD HH:MM)
+--              in either order at the end of the description
 --
 -- parse() returns nil for non-tasks and malformed/ambiguous metadata.
 
@@ -40,6 +41,7 @@ local function contains(value, key)
 end
 
 local TS = "@done%(%d%d%d%d%-%d%d%-%d%d %d%d:%d%d%)"
+local DUE = "@due%(%d%d%d%d%-%d%d%-%d%d%)"
 
 local DAYS = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
 
@@ -72,6 +74,10 @@ local function valid_datetime(s)
 end
 
 M.valid_datetime = valid_datetime
+
+function M.valid_date(s)
+  return type(s) == "string" and valid_datetime(s .. " 00:00")
+end
 
 -- Interpret completed_states for `state`. Returns (completed, valid).
 -- A list of state names marks those states completed. A map uses boolean
@@ -252,47 +258,49 @@ function M.parse(line, config)
 
   local text_start = k
   local text_end = e
-  local done_ts, ts_s, ts_e
+  local metadata, metadata_spans = {}, {}
 
-  -- Optional trailing managed timestamp. Only the last "@done(" in the
-  -- description qualifies when everything after it is its own closing ")"
-  -- (or, for missing-closing-paren metadata, nothing). Embedded timestamp-like
-  -- prose (a ")" followed by more text) is preserved verbatim.
-  local a = nil
-  do
-    local p = text_start
-    while true do
-      local x = line:find("@done(", p, true)
-      if not x or x > e then
-        break
+  -- Strip at most one deadline and one completion timestamp from the suffix.
+  -- Embedded metadata-like prose remains description text, as before.
+  for _ = 1, 2 do
+    local a, name
+    for _, candidate in ipairs({ "done", "due" }) do
+      local p = text_start
+      while true do
+        local x = line:find("@" .. candidate .. "(", p, true)
+        if not x or x > text_end then
+          break
+        end
+        if not a or x > a then
+          a, name = x, candidate
+        end
+        p = x + 1
       end
-      a = x
-      p = x + 1
     end
-  end
-  if a and (a == text_start or is_hws(line:sub(a - 1, a - 1))) then
-    local tail = line:sub(a, e)
+    if not a or metadata[name] or (a ~= text_start and not is_hws(line:sub(a - 1, a - 1))) then
+      break
+    end
+    local tail = line:sub(a, text_end)
     local close = tail:find(")", 1, true)
-    if close and close == #tail then
-      local dt = tail:match("^@done%((%d%d%d%d%-%d%d%-%d%d %d%d:%d%d)%)$")
-      if not dt then
-        return nil -- malformed timestamp metadata
-      end
-      if not valid_datetime(dt) then
-        return nil -- invalid date/time
-      end
-      local desc = line:sub(text_start, a - 1)
-      if desc:find(TS) then
-        return nil -- duplicate timestamp metadata
-      end
-      done_ts = dt
-      ts_s, ts_e = a - 1, e
-      text_end = a - 1
-      while text_end >= text_start and is_hws(line:sub(text_end, text_end)) do
-        text_end = text_end - 1
-      end
-    elseif not close then
-      return nil -- malformed trailing @done metadata (missing closing paren)
+    if not close then
+      return nil -- malformed trailing metadata (missing closing paren)
+    end
+    if close ~= #tail then
+      break -- embedded prose, not a managed suffix
+    end
+    local value = tail:match("^@" .. name .. "%((.-)%)$")
+    if not value or not ((name == "done" and valid_datetime(value)) or (name == "due" and M.valid_date(value))) then
+      return nil -- malformed or invalid calendar metadata
+    end
+    local pattern = name == "done" and TS or DUE
+    if line:sub(text_start, a - 1):find(pattern) then
+      return nil -- duplicate managed metadata
+    end
+    metadata[name] = value
+    metadata_spans[name] = { a - 1, text_end }
+    text_end = a - 1
+    while text_end >= text_start and is_hws(line:sub(text_end, text_end)) do
+      text_end = text_end - 1
     end
   end
 
@@ -319,12 +327,14 @@ function M.parse(line, config)
     checked = checked,
     priority = priority,
     text = text,
-    done_timestamp = done_ts,
+    done_timestamp = metadata.done,
+    due_date = metadata.due,
     spans = {
       checkbox = { cb_s, cb_e },
       state = { st_s - 1, st_e },
       priority = priority and { pr_s, pr_e } or nil,
-      done_timestamp = done_ts and { ts_s, ts_e } or nil,
+      done_timestamp = metadata_spans.done,
+      due_date = metadata_spans.due,
       text = { text_start - 1, text_end },
     },
   }

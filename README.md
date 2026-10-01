@@ -1,6 +1,6 @@
 # tino.nvim
 
-**TINO** — **T**his **I**s **N**ot **O**rg-mode — is a small, dependency-free
+**TINO** (**T**his **I**s **N**ot **O**rg-mode) is a small, dependency-free
 Markdown-first task plugin for Neovim. The name is a nod to what it deliberately
 is *not*: there is no Org-mode under the hood, no outlining engine, and no
 proprietary file format. It is just Markdown, a checkbox, and a state token.
@@ -13,6 +13,7 @@ in any editor.
 ```markdown
 - [ ] TODO write the parser
 - [ ] DOING [#A] refile support
+- [ ] TODO submit the report @due(2026-10-15)
 - [x] DONE ship the README @done(2024-05-01 09:30)
 ```
 
@@ -42,8 +43,9 @@ The same repository holds the source: <https://github.com/gdemoro/tino.nvim>.
 ## Philosophy
 
 - Tasks are normal Markdown checkbox list items.
-- Only the controlled tokens (state, optional priority, managed timestamp) are
-  ever rewritten; everything else on the line is preserved byte-for-byte.
+- Only the controlled tokens (state, optional priority, deadline, managed
+  completion timestamp) are ever rewritten; everything else on the line is
+  preserved byte-for-byte.
 - Buffer edits are never saved to disk automatically. You decide when to
   `:write`.
 - Scanning and refiling are read-only unless you explicitly ask for a move.
@@ -53,7 +55,7 @@ The same repository holds the source: <https://github.com/gdemoro/tino.nvim>.
 A task line is (after optional horizontal-whitespace indentation):
 
 ```
-<marker><ws>+<checkbox><ws>+<STATE>[ [#P]]<ws>+<description>[ <ws>+@done(YYYY-MM-DD HH:MM)]<ws>*
+<marker><ws>+<checkbox><ws>+<STATE>[ [#P]]<ws>+<description>[<ws>+<metadata>]*<ws>*
 ```
 
 - **marker** – `-`, `*`, `+`, or one to nine digits followed by `.` or `)`
@@ -63,15 +65,17 @@ A task line is (after optional horizontal-whitespace indentation):
 - **priority** – an optional single configured uppercase letter cookie `[#A]`.
 - **description** – any non-empty text, including Unicode; embedded whitespace
   is preserved.
-- **timestamp** – an optional single trailing canonical
-  `@done(YYYY-MM-DD HH:MM)`; the date and time are validated.
+- **metadata** – an optional single `@due(YYYY-MM-DD)` deadline and/or single
+  `@done(YYYY-MM-DD HH:MM)` completion timestamp, at the end of the description
+  in either order. Gregorian dates (including leap years) and times are
+  validated. Embedded metadata-like prose followed by more text stays prose.
 
 Plain Markdown checkboxes that are not tasks (for example `- [ ] buy milk` with
 no state token, or tasks inside fenced code blocks) are ignored. Lines are
 matched byte-for-byte, so a terminal carriage return is preserved and never
 rewritten. A repeated, unknown, or malformed leading `[#…]` cookie, or a
-malformed trailing `@done(...)` (including a missing closing parenthesis), makes
-the line refuse to parse.
+malformed, invalid, or duplicated trailing `@done(...)` / `@due(...)` metadata
+(including a missing closing parenthesis), makes the line refuse to parse.
 
 ### Fence detection scope (lexical)
 
@@ -135,7 +139,7 @@ nothing is scanned.
 
 ## Commands
 
-All seven commands are user commands. No mappings are created by default.
+All eight commands are user commands. No mappings are created by default.
 
 | Command | Description |
 | --- | --- |
@@ -143,8 +147,9 @@ All seven commands are user commands. No mappings are created by default.
 | `:TinoPriority` | Cycle the task's priority cookie (`none -> A -> B -> C -> none`). |
 | `:TinoDone` | Set the task to `DONE` directly (bypassing the cycle): the checkbox becomes `[x]` and a managed `@done(YYYY-MM-DD HH:MM)` timestamp is added when `done_timestamp = true`. |
 | `:TinoTodo` | Set the task to `TODO` directly (bypassing the cycle): the checkbox becomes `[ ]` and any managed `@done(...)` timestamp is removed. |
-| `:TinoCapture` | Prompt for text (and optional priority) and append a task to the inbox buffer. |
-| `:TinoAgenda` | Open a read-only agenda of all tasks under `roots`. |
+| `:TinoDue` | Prompt for a deadline on the current task; set/replace it, or remove it with empty input. |
+| `:TinoCapture` | Prompt for text, optional priority, then optional deadline, and append a task to the inbox buffer. |
+| `:TinoAgenda` | Open a read-only agenda of all tasks under `roots`, including due dates. |
 | `:TinoRefile` | Structurally move the current top-level task item (with nested content) to another file. |
 
 ### Direct setters: `:TinoDone` and `:TinoTodo`
@@ -171,6 +176,21 @@ mutation command, non-task lines, keyword-only lines, lines whose checkbox does
 not match the completion role, fenced code blocks, and read-only /
 non-modifiable buffers are refused unchanged.
 
+### Deadlines: `:TinoDue` and capture
+
+`:TinoDue` accepts `YYYY-MM-DD`, `today`, `tomorrow`, `+Nd` (N days from today),
+or `+Nw` (N weeks from today). Relative inputs use the local calendar date.
+Every accepted value is stored as `@due(YYYY-MM-DD)`; for example, `+2w`
+means fourteen days from today. Empty input removes the deadline; cancelling
+leaves the task unchanged. Invalid input warns without editing anything.
+Existing description, priority and completion metadata are preserved. State
+changes do not remove deadlines.
+
+Capture asks **task text → priority → due date**, using the same date formats.
+Empty due input creates a task without a deadline; cancelling aborts capture.
+There are no new configuration options, dependencies, calendar pickers,
+recurring tasks, scheduling or tags.
+
 ### Example mappings (optional, your choice)
 
 ```lua
@@ -181,6 +201,7 @@ vim.keymap.set("n", "<leader>tp", "<cmd>TinoPriority<cr>", { desc = "tino: cycle
 vim.keymap.set("n", "<leader>ta", "<cmd>TinoAgenda<cr>",   { desc = "tino: agenda" })
 vim.keymap.set("n", "<leader>tr", "<cmd>TinoRefile<cr>",   { desc = "tino: refile" })
 vim.keymap.set("n", "<leader>ti", "<cmd>TinoCapture<cr>",  { desc = "tino: capture" })
+vim.keymap.set("n", "<leader>tu", "<cmd>TinoDue<cr>",      { desc = "tino: set due date" })
 ```
 
 ## Timestamps
@@ -200,7 +221,7 @@ refuse to parse as a task (so the plugin will not touch it).
 The plugin edits buffers only. It **never writes to disk automatically**.
 
 - Capture opens the inbox buffer with the new task appended; press `:write`.
-- Cycle/priority/refile modify buffers in place; save with `:write` (or `:wall`
+- State/priority/deadline/refile commands modify buffers in place; save with `:write` (or `:wall`
   to save every modified buffer).
 - After a refile, **both** the source and destination buffers are modified and
   shown as edited; each keeps its own undo history and save state.
@@ -208,8 +229,9 @@ The plugin edits buffers only. It **never writes to disk automatically**.
 ## Agenda
 
 `:TinoAgenda` opens a read-only `nofile` buffer listing tasks grouped by
-configured state order, showing state, priority, `file:line`, and description.
-Completed states are hidden unless `agenda.include_completed = true`.
+configured state order, showing state, priority, `file:line`, description and
+`@due(YYYY-MM-DD)` when present. Completed states are hidden unless
+`agenda.include_completed = true`.
 
 - `<CR>` jumps to the verified original source line; a stale entry notifies
   instead of jumping.
@@ -219,8 +241,8 @@ Completed states are hidden unless `agenda.include_completed = true`.
 
 ## Refile
 
-`:TinoRefile` moves the **top-level** task item under the cursor — including
-all of its nested lists, paragraphs, blank lines, and closed fenced code blocks —
+`:TinoRefile` moves the **top-level** task item under the cursor, including
+all of its nested lists, paragraphs, blank lines, and closed fenced code blocks,
 to another `.md` file chosen with `vim.ui.select` from the configured `roots`.
 
 It is the only command that requires Tree-sitter. It locates the `list_item`
@@ -230,9 +252,9 @@ then moves whole original lines untouched. `TinoRefile`:
 - uses the real Neovim Markdown parser (no `nvim-treesitter` dependency);
 - snapshots every destination candidate *before* `vim.ui.select` (loaded
   buffers by id/name/tick/contents, unloaded files by on-disk identity and
-  contents) and revalidates the source and the chosen destination — names,
+  contents) and revalidates the source and the chosen destination (names,
   current resolved paths, physical identity (device/inode/type), ticks/contents,
-  editability — immediately before editing, after destination loading has fired
+  editability) immediately before editing, after destination loading has fired
   any autocmds;
 - refuses nested or block-quoted sources (only top-level items can be refiled;
   nested content *inside* the moved item travels intact);
@@ -246,12 +268,12 @@ then moves whole original lines untouched. `TinoRefile`:
 - on failure restores the exact full pre-edit contents of **both** buffers,
   including a partially modified destination, and reports rollback failure
   honestly;
-- never saves automatically — both edited buffers are left visible for
+- never saves automatically; both edited buffers are left visible for
   `:write`/`:wall`.
 
 Known limitations: it will not attempt to refile a nested or block-quoted task,
 and it will not insert an emergency Markdown boundary into an unsafe
-destination — it refuses instead.
+destination; it refuses instead.
 
 ## Parser API
 
@@ -262,14 +284,15 @@ local parser = require("tino.parser")
 
 parser.parse(line, config)
 -- -> nil  for non-tasks, malformed, or ambiguous lines
--- -> { state, checked, priority, text, done_timestamp, line,
---      spans = { checkbox, state, priority, done_timestamp, text } }
+-- -> { state, checked, priority, text, due_date, done_timestamp, line,
+--      spans = { checkbox, state, priority, due_date, done_timestamp, text } }
 --    where spans are zero-based, exclusive byte ranges of controlled tokens.
 
 parser.scan_lines(lines, config)
 -- -> { { row, line, task }, ... } skipping fenced code blocks.
 
 parser.valid_datetime("2024-05-01 09:30") -- -> true/false
+parser.valid_date("2024-02-29")           -- -> true/false
 ```
 
 `config` is optional; when omitted the active `require("tino").config` is
@@ -284,8 +307,7 @@ under the gitignored `test/tmp/`.
 nvim --headless -u NONE -i NONE -l test/run.lua
 ```
 
-Current result: **215 passed, 0 failed, 0 skipped** (Neovim 0.12.5). The
-command always prints the current totals, so treat that run output as
+The command prints the current pass/fail totals; treat that run output as
 authoritative.
 
 ## Compatibility
@@ -294,4 +316,4 @@ authoritative.
 - No external plugins, no shelling out, no network access.
 - Purely Markdown: no folding, preview, adapters, databases, indexes, or jobs.
   Despite the name, TINO does **not** implement Org-mode: no outline tree, no
-  agenda clock, no properties drawer, no export engine — just Markdown tasks.
+  agenda clock, no properties drawer, no export engine, just Markdown tasks.

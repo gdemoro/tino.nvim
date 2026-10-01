@@ -1,6 +1,7 @@
 -- tino task mutation: state/priority cycling with safe in-buffer edits.
 
 local parser = require("tino.parser")
+local dates = require("tino.date")
 local M = {}
 
 local function notify(msg, level)
@@ -87,6 +88,12 @@ function M.parse_at(bufnr, row, config)
   return parser.parse(line, config)
 end
 
+local function metadata_end(task)
+  local due = task.spans.due_date
+  local done = task.spans.done_timestamp
+  return math.max(task.spans.text[2], due and due[2] or 0, done and done[2] or 0)
+end
+
 -- Build the span edits that move `task` to `newstate`, syncing the checkbox
 -- and the managed completion timestamp. Shared by cycle_state and set_state so
 -- cycle ordering/completion semantics stay identical. An existing canonical
@@ -102,13 +109,18 @@ local function state_transition_edits(config, task, newstate)
   if complete then
     if not task.done_timestamp and config.done_timestamp then
       edits[#edits + 1] = {
-        task.spans.text[2],
-        task.spans.text[2],
+        metadata_end(task),
+        metadata_end(task),
         " @done(" .. os.date("%Y-%m-%d %H:%M") .. ")",
       }
     end
   elseif task.done_timestamp then
-    edits[#edits + 1] = { task.spans.text[2], task.spans.done_timestamp[2], "" }
+    local span = task.spans.done_timestamp
+    local start = span[1]
+    while start > 0 and is_hws_byte(task.line:sub(start, start)) do
+      start = start - 1
+    end
+    edits[#edits + 1] = { start, span[2], "" }
   end
   return edits
 end
@@ -224,6 +236,71 @@ end
 -- :TinoTodo - set the current task keyword to the literal "TODO".
 function M.set_todo(bufnr, row, config)
   return direct_set(bufnr, row, "TODO", false, config)
+end
+
+-- Set, replace or remove only the managed deadline and its separator.
+function M.set_due(bufnr, row, input, config)
+  config = resolve_config(config)
+  bufnr = bufnr or 0
+  if not editable(bufnr) then
+    return false
+  end
+  local date, err = dates.normalize(input)
+  if not date then
+    notify(err, vim.log.levels.WARN)
+    return false
+  end
+  local task = M.parse_at(bufnr, row, config)
+  if not task then
+    notify("not a valid task", vim.log.levels.WARN)
+    return false
+  end
+  local span = task.spans.due_date
+  if date == "" then
+    if not span then
+      return true
+    end
+    -- Remove exactly one separator byte; preserve other user whitespace.
+    return apply(bufnr, row, task.line, { { span[1] - 1, span[2], "" } })
+  elseif span then
+    return apply(bufnr, row, task.line, { { span[1], span[2], "@due(" .. date .. ")" } })
+  end
+  local finish = metadata_end(task)
+  return apply(bufnr, row, task.line, { { finish, finish, " @due(" .. date .. ")" } })
+end
+
+function M.prompt_due(bufnr, row, config)
+  config = resolve_config(config)
+  bufnr = bufnr or 0
+  if bufnr == 0 then
+    bufnr = vim.api.nvim_get_current_buf()
+  end
+  if not editable(bufnr) then
+    return false
+  end
+  local task = M.parse_at(bufnr, row, config)
+  if not task then
+    notify("not a valid task", vim.log.levels.WARN)
+    return false
+  end
+  vim.ui.input({
+    prompt = "Due (YYYY-MM-DD, today, tomorrow, +Nd, +Nw; blank to remove): ",
+    default = task.due_date or "",
+  }, function(input)
+    if input == nil then
+      return -- cancelled
+    end
+    if not editable(bufnr) then
+      return
+    end
+    local current = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+    if current ~= task.line then
+      notify("task changed since prompt; aborting", vim.log.levels.WARN)
+      return
+    end
+    M.set_due(bufnr, row, input, config)
+  end)
+  return true
 end
 
 -- Cycle the priority cookie none -> A -> B -> C -> none, preserving all
