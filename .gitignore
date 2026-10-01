@@ -1,0 +1,3 @@
+*.log
+/test/tmp/
+/.pi/tino-rename/
