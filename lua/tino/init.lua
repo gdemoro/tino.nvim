@@ -219,6 +219,7 @@ function M._register_commands()
     TinoCapture = "tino.capture",
     TinoAgenda = "tino.agenda",
     TinoRefile = "tino.refile",
+    TinoFiles = "tino.picker",
   }
   for name, mod in pairs(lazy) do
     vim.api.nvim_create_user_command(name, function()

@@ -139,7 +139,7 @@ nothing is scanned.
 
 ## Commands
 
-All nine commands are user commands. No mappings are created by default.
+All ten commands are user commands. No mappings are created by default.
 
 | Command | Description |
 | --- | --- |
@@ -152,6 +152,19 @@ All nine commands are user commands. No mappings are created by default.
 | `:TinoCapture` | Prompt for text, optional priority, then optional deadline, and append a task to the inbox buffer. |
 | `:TinoAgenda` | Open a read-only agenda of all tasks under `roots`, including due dates. |
 | `:TinoRefile` | Structurally move the current top-level task item (with nested content) to another file. |
+| `:TinoFiles` | Open a `.md` file discovered under the configured `roots` in the current window. |
+
+### Opening files: `:TinoFiles`
+
+`:TinoFiles` lists every `.md` file discovered under the configured `roots`
+(nested files included, non-Markdown ignored) and opens the chosen one in the
+current window using native `:hide edit`, so an unsaved current buffer is kept
+(hidden, never discarded) and no split is created. It works from any buffer and
+cursor position, parses no task, and needs no `roots` fallback: with no
+configured roots, no files, or a cancelled picker it simply does nothing. The
+chooser prefers a Snacks file picker when a usable Snacks provider is present
+and otherwise falls back to `vim.ui.select` with the same candidates, exactly
+like `:TinoRefile`.
 
 ### Direct setters: `:TinoDone` and `:TinoTodo`
 
