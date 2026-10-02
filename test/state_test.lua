@@ -333,36 +333,32 @@ H.describe("TinoState command", function()
     md.setup()
   end
 
-  -- Stub the built-in prompt; `label` nil models dismissal (cancellation).
-  local function with_select(label, fn)
-    local orig = vim.ui.select
-    vim.ui.select = function(items, opts, on_choice)
-      H.assert(type(opts.prompt) == "string", "prompt provided")
-      local idx
-      if label ~= nil then
-        for i, it in ipairs(items) do
-          if it == label then
-            idx = i
-            break
-          end
-        end
-        H.assert(idx, "no select entry: " .. tostring(label))
+  -- Stub the one-key prompt; `key` is the returned keypress. `nil` models an
+  -- interrupt (Ctrl-C), while "\27" models Esc. Returns the number of reads.
+  local function with_key(key, fn)
+    local orig = vim.fn.getcharstr
+    local reads = 0
+    vim.fn.getcharstr = function()
+      reads = reads + 1
+      if key == nil then
+        error("Vim:Interrupt")
       end
-      on_choice(label ~= nil and items[idx] or nil, idx)
+      return key
     end
     local ok, err = pcall(fn)
-    vim.ui.select = orig
+    vim.fn.getcharstr = orig
     if not ok then
       error(err, 2)
     end
+    return reads
   end
 
-  local function run(label, line)
+  local function run(key, line)
     local b = vim.api.nvim_create_buf(true, true)
     vim.api.nvim_buf_set_lines(b, 0, -1, false, { line })
     vim.api.nvim_set_current_buf(b)
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
-    with_select(label, function()
+    with_key(key, function()
       vim.cmd("TinoState")
     end)
     return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1]
@@ -380,34 +376,45 @@ H.describe("TinoState command", function()
       -- Direct choice from a completed task to every active state: the managed
       -- timestamp is dropped, the marker/word resynced, text/priority/due and
       -- the unrelated @owner token all retained.
-      { "t -> TODO", full, "- [ ] TODO [#B] fix bug @owner(alice) @due(2026-02-01)" },
-      { "d -> DOING", full, "- [/] DOING [#B] fix bug @owner(alice) @due(2026-02-01)" },
-      { "w -> WAITING", full, "- [~] WAITING [#B] fix bug @owner(alice) @due(2026-02-01)" },
+      { "t", full, "- [ ] TODO [#B] fix bug @owner(alice) @due(2026-02-01)" },
+      { "d", full, "- [/] DOING [#B] fix bug @owner(alice) @due(2026-02-01)" },
+      { "w", full, "- [~] WAITING [#B] fix bug @owner(alice) @due(2026-02-01)" },
       -- Completed -> completed keeps the existing timestamp verbatim.
-      { "c -> CANCELLED", full, "- [-] CANCELLED [#B] fix bug @owner(alice) @due(2026-02-01) @done(2026-10-01 13:15)" },
+      { "c", full, "- [-] CANCELLED [#B] fix bug @owner(alice) @due(2026-02-01) @done(2026-10-01 13:15)" },
       -- Same-state DONE is idempotent and keeps the timestamp verbatim.
-      { "x -> DONE", full, full },
+      { "x", full, full },
       -- Marker-only task gains its explicit word and canonical marker.
-      { "d -> DOING", "- [~] aspettare risposta", "- [/] DOING aspettare risposta" },
+      { "d", "- [~] aspettare risposta", "- [/] DOING aspettare risposta" },
     }
     for _, c in ipairs(cases) do
       H.eq(run(c[1], c[2]), c[3], c[1] .. " from " .. c[2])
     end
 
+    -- Every shortcut resolves with exactly one key read: no Enter confirmation.
+    local b = vim.api.nvim_create_buf(true, true)
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, { "- [ ] TODO one read" })
+    vim.api.nvim_set_current_buf(b)
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    local reads = with_key("d", function()
+      vim.cmd("TinoState")
+    end)
+    H.eq(reads, 1, "exactly one key read")
+    H.eq(vim.api.nvim_buf_get_lines(b, 0, 1, false)[1], "- [/] DOING one read")
+
     -- Active -> DONE appends exactly one fresh managed timestamp.
-    local done = run("x -> DONE", "- [/] DOING [#B] fix bug @due(2026-02-01)")
-    H.assert(done:match("^%- %[x%] DONE %[#B%] fix bug @due%(2026%-02%-01%) .. " .. TS_PAT),
+    local done = run("x", "- [/] DOING [#B] fix bug @due(2026-02-01)")
+    H.assert(done:match("^%- %[x%] DONE %[#B%] fix bug @due%(2026%-02%-01%)" .. TS_PAT),
       "got: " .. done)
   end)
 
   H.it("promotes plain text directly into the chosen state", function()
     fresh()
-    H.eq(run("t -> TODO", "write docs"), "- [ ] TODO write docs")
-    H.eq(run("d -> DOING", "write docs"), "- [/] DOING write docs")
-    H.eq(run("w -> WAITING", "  indented"), "  - [~] WAITING indented")
-    for _, label in ipairs({ "x -> DONE", "c -> CANCELLED" }) do
-      local line = run(label, "ship it")
-      H.assert(line:match("^%- %[[x%-]%] " .. label:sub(6) .. " ship it" .. TS_PAT), "got: " .. line)
+    H.eq(run("t", "write docs"), "- [ ] TODO write docs")
+    H.eq(run("d", "write docs"), "- [/] DOING write docs")
+    H.eq(run("w", "  indented"), "  - [~] WAITING indented")
+    for _, c in ipairs({ { "x", "DONE" }, { "c", "CANCELLED" } }) do
+      local line = run(c[1], "ship it")
+      H.assert(line:match("^%- %[[x%-]%] " .. c[2] .. " ship it" .. TS_PAT), "got: " .. line)
     end
 
     -- done_timestamp disabled: a completed target gets no timestamp.
@@ -421,19 +428,22 @@ H.describe("TinoState command", function()
       inbox = nil,
     }
     md.setup()
-    H.eq(run("x -> DONE", "no ts"), "- [x] DONE no ts")
+    H.eq(run("x", "no ts"), "- [x] DONE no ts")
   end)
 
   H.it("leaves non-task, blank and list lines untouched", function()
     fresh()
     for _, line in ipairs({ "", "   ", "- [ ]TODOx y", "1. ordered item" }) do
-      H.eq(run("d -> DOING", line), line, "untouched: " .. vim.inspect(line))
+      H.eq(run("d", line), line, "untouched: " .. vim.inspect(line))
     end
   end)
 
   H.it("cancellation is a no-op", function()
     fresh()
+    -- Esc and an interrupt: no edit.
+    H.eq(run("\27", "- [ ] TODO keep"), "- [ ] TODO keep")
     H.eq(run(nil, "- [ ] TODO keep"), "- [ ] TODO keep")
-    H.eq(run(nil, "plain text keep"), "plain text keep")
+    -- Unrecognised key: no edit.
+    H.eq(run("z", "plain text keep"), "plain text keep")
   end)
 end)

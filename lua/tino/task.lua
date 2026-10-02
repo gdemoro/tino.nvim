@@ -347,14 +347,14 @@ function M.set_todo(bufnr, row, config)
   return plain_text_task(bufnr, row, line, "TODO", config)
 end
 
--- Built-in :TinoState choices. Each label is the exact select entry; its index
--- maps unambiguously to the configured state token.
-local STATE_CHOICES = {
-  { label = "t -> TODO", state = "TODO" },
-  { label = "d -> DOING", state = "DOING" },
-  { label = "w -> WAITING", state = "WAITING" },
-  { label = "x -> DONE", state = "DONE" },
-  { label = "c -> CANCELLED", state = "CANCELLED" },
+-- Built-in :TinoState shortcuts. Each key maps to the configured state token
+-- applied immediately when the single key is pressed.
+local STATE_KEYS = {
+  t = "TODO",
+  d = "DOING",
+  w = "WAITING",
+  x = "DONE",
+  c = "CANCELLED",
 }
 
 -- Direct-set worker for :TinoState. An existing task (explicit or marker-only)
@@ -393,28 +393,32 @@ function M.set_state_or_create(bufnr, row, state, config)
   return plain_text_task(bufnr, row, line, state, config)
 end
 
--- :TinoState - prompt once through the built-in vim.ui.select and directly set
--- the current task (or promote plain text) to the chosen state. The target
--- buffer and row are captured before the asynchronous callback so a later
--- window/buffer change cannot retarget the edit. Dismissing the prompt is a
--- no-op.
+-- :TinoState - echo the shortcuts and read a single key, then directly set the
+-- current task (or promote plain text) to the matching state. There is no
+-- further confirmation. The target buffer and row are captured before the key
+-- prompt so a later window/buffer change cannot retarget the edit. Esc, an
+-- unrecognised key, or an interrupt is a no-op.
 function M.prompt_state(bufnr, row, config)
   config = resolve_config(config)
   bufnr = bufnr or 0
   if bufnr == 0 then
     bufnr = vim.api.nvim_get_current_buf()
   end
-  local items = {}
-  for i, c in ipairs(STATE_CHOICES) do
-    items[i] = c.label
+  vim.api.nvim_echo(
+    { { "Set state: t TODO  d DOING  w WAITING  x DONE  c CANCELLED (Esc to cancel)" } },
+    false,
+    {}
+  )
+  local ok, key = pcall(vim.fn.getcharstr)
+  vim.api.nvim_echo({ { "" } }, false, {})
+  if not ok then
+    return false -- interrupted (e.g. Ctrl-C)
   end
-  vim.ui.select(items, { prompt = "Set state" }, function(_, idx)
-    if idx == nil then
-      return -- cancelled
-    end
-    M.set_state_or_create(bufnr, row, STATE_CHOICES[idx].state, config)
-  end)
-  return true
+  local state = type(key) == "string" and STATE_KEYS[key] or nil
+  if not state then
+    return false -- Esc or an unrecognised key
+  end
+  return M.set_state_or_create(bufnr, row, state, config)
 end
 
 -- Set, replace or remove only the managed deadline and its separator.

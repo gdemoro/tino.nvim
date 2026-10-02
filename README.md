@@ -147,7 +147,7 @@ All nine commands are user commands. No mappings are created by default.
 | `:TinoPriority` | Cycle the task's priority cookie (`none -> A -> B -> C -> none`). |
 | `:TinoDone` | Set the task to `DONE` directly (bypassing the cycle): the checkbox becomes `[x]` and a managed `@done(YYYY-MM-DD HH:MM)` timestamp is added when `done_timestamp = true`. |
 | `:TinoTodo` | Set the task to `TODO` directly (bypassing the cycle): the checkbox becomes `[ ]` and any managed `@done(...)` timestamp is removed. |
-| `:TinoState` | Prompt once for a state (`t TODO`, `d DOING`, `w WAITING`, `x DONE`, `c CANCELLED`) and set the task directly to the chosen state. |
+| `:TinoState` | Read a single key (`t` TODO, `d` DOING, `w` WAITING, `x` DONE, `c` CANCELLED) and set the task directly to that state; `Esc` cancels. |
 | `:TinoDue` | Prompt for a deadline on the current task; set/replace it, or remove it with empty input. |
 | `:TinoCapture` | Prompt for text, optional priority, then optional deadline, and append a task to the inbox buffer. |
 | `:TinoAgenda` | Open a read-only agenda of all tasks under `roots`, including due dates. |
@@ -179,11 +179,12 @@ non-modifiable buffers are refused unchanged.
 
 ### State chooser: `:TinoState`
 
-`:TinoState` opens a single built-in `vim.ui.select` prompt with the fixed
-choices `t -> TODO`, `d -> DOING`, `w -> WAITING`, `x -> DONE`, and
-`c -> CANCELLED`, then sets the current task (or promotes plain text) directly
-to the chosen configured state. Dismissing the prompt changes nothing; each
-choice must be a configured state, and unknown targets warn without editing.
+`:TinoState` echoes the available keys and reads a single keypress: `t` sets
+`TODO`, `d` `DOING`, `w` `WAITING`, `x` `DONE`, and `c` `CANCELLED`. The
+current task (or promoted plain text) is set directly to the chosen configured
+state as soon as that key is pressed; no Enter confirmation is required.
+`Esc`, an unrecognised key, or an interrupt changes nothing, and each key must
+map to a configured state (unknown targets warn without editing).
 
 ### Deadlines: `:TinoDue` and capture
 
