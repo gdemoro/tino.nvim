@@ -1,5 +1,6 @@
 local H = require("harness")
 local picker = require("tino.picker")
+local CREATE = "Create new file..."
 
 -- Run `fn` with deterministic stubs: scheduled callbacks fire synchronously,
 -- the global Snacks provider is set to `snacks`, the `snacks` module is not
@@ -124,6 +125,56 @@ H.describe("picker.select_files snacks", function()
       H.eq(#order, 2, "no extra events")
 
       -- A late on_close after confirm must not re-fire.
+      cap.on_close()
+      H.eq(calls.n, 1, "no duplicate callback after confirm")
+    end)
+  end)
+
+  H.it("exposes a synthetic Create item that confirms without a file", function()
+    local paths = { "/r/a.md" }
+    with_env({}, function()
+      local cap = nil
+      _G.Snacks = { picker = { pick = function(o)
+        cap = o
+      end } }
+      vim.ui.select = function()
+        error("vim.ui.select must not be used when Snacks is available")
+      end
+
+      local order, calls = {}, { n = 0, last = false }
+      picker.select_files(paths, { prompt = "Refile task to:", create_new = true }, function(choice)
+        order[#order + 1] = "callback"
+        calls.n = calls.n + 1
+        calls.last = choice
+      end)
+
+      H.eq(#cap.items, 2, "one item per path plus the Create action")
+      local create = cap.items[2]
+      H.eq(create.text, CREATE, "Create item carries the literal label")
+      H.eq(create.file, nil, "Create item has no file")
+      H.eq(create.create, true, "Create item is marked as create")
+      H.eq(type(cap.format), "function", "custom formatter installed")
+      local formatted = cap.format(create)
+      H.eq(#formatted, 1, "Create item formats as a single chunk")
+      H.eq(formatted[1][1], CREATE, "Create item text is its label")
+      H.eq(formatted[1][2], "Special", "Create item uses the Special highlight")
+      local filefmt = cap.format(cap.items[1])
+      H.eq(#filefmt, 1, "file item formats as a single chunk")
+      H.eq(filefmt[1][1], paths[1], "file item falls back to plain file text")
+
+      local fake = { closed = false }
+      function fake:close()
+        self.closed = true
+        order[#order + 1] = "close"
+        cap.on_close()
+      end
+      cap.actions.confirm(fake, create)
+
+      H.assert(fake.closed, "picker closed")
+      H.eq(order[1], "close", "close precedes callback")
+      H.eq(order[2], "callback")
+      H.eq(calls.n, 1, "confirm callback once")
+      H.eq(calls.last, CREATE, "confirm emits the Create label")
       cap.on_close()
       H.eq(calls.n, 1, "no duplicate callback after confirm")
     end)

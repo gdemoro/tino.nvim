@@ -11,6 +11,9 @@
 -- it is always invoked exactly once.
 
 local M = {}
+local files = require("tino.files")
+local uv = vim.uv or vim.loop
+local CREATE = "Create new file..."
 
 -- True for a provider exposing the public Snacks picker API we rely on.
 local function usable(provider)
@@ -44,6 +47,10 @@ function M.select_files(paths, opts, on_choice)
   end
   opts = opts or {}
   paths = type(paths) == "table" and paths or {}
+  local choices = paths
+  if opts.create_new then
+    choices = vim.list_extend(vim.deepcopy(paths), { CREATE })
+  end
 
   local provider = picker_provider()
   local completed = false
@@ -67,21 +74,32 @@ function M.select_files(paths, opts, on_choice)
     for _, path in ipairs(paths) do
       items[#items + 1] = { file = path, text = path }
     end
+    local format = "file"
+    if opts.create_new then
+      items[#items + 1] = { text = CREATE, create = true }
+      format = function(item, p)
+        if item.create then
+          return { { CREATE, "Special" } }
+        end
+        local formatter = provider.picker.format and provider.picker.format.file
+        return formatter and formatter(item, p) or { { item.file } }
+      end
+    end
     local ok = pcall(provider.picker.pick, {
       items = items,
-      format = "file",
+      format = format,
       preview = "file",
       title = opts.prompt or "Select file",
       actions = {
         confirm = function(picker, item)
-          if item == nil or item.file == nil then
+          if completed or item == nil or (item.file == nil and not item.create) then
             return
           end
           -- Mark completed before closing so on_close does not also cancel.
           completed = true
           picker:close()
           vim.schedule(function()
-            on_choice(item.file)
+            on_choice(item.create and CREATE or item.file)
           end)
         end,
       },
@@ -100,8 +118,157 @@ function M.select_files(paths, opts, on_choice)
   -- vim.ui.select already invokes this callback after its own UI has closed,
   -- so deliver directly (no extra scheduling) to preserve the caller's
   -- synchronous contract.
-  vim.ui.select(paths, opts, function(choice)
+  vim.ui.select(choices, opts, function(choice)
     on_choice(choice)
+  end)
+end
+
+local function inside(path, root)
+  return root == "/" or path == root or path:sub(1, #root + 1) == root .. "/"
+end
+
+-- Resolve a new name against a real directory root, including existing parent
+-- symlinks. Missing path components remain within that root; no files are written.
+function M.new_path(root, name)
+  if type(name) ~= "string" or name:find("[%z\r\n]") then
+    return nil, "invalid relative path"
+  end
+  name = vim.trim(name):gsub("\\", "/")
+  if name == "" or name:match("^/") or name:match("^%a:") then
+    return nil, "expected a relative path inside the root"
+  end
+  local base = uv.fs_realpath(files.normalize(root) or "")
+  local stat = base and uv.fs_stat(base)
+  if not stat or stat.type ~= "directory" then
+    return nil, "root is not an existing directory"
+  end
+  local parts = {}
+  for part in name:gmatch("[^/]+") do
+    if part == ".." then
+      if #parts == 0 then
+        return nil, "path escapes the configured root"
+      end
+      parts[#parts] = nil
+    elseif part ~= "." then
+      parts[#parts + 1] = part
+    end
+  end
+  if #parts == 0 then
+    return nil, "expected a file name"
+  end
+  if not parts[#parts]:match("%.md$") then
+    parts[#parts] = parts[#parts] .. ".md"
+  end
+  local path = base
+  for i, part in ipairs(parts) do
+    path = (path:sub(-1) == "/" and path or path .. "/") .. part
+    if uv.fs_lstat(path) then
+      local real = uv.fs_realpath(path)
+      if not real or not inside(real, base) then
+        return nil, "path escapes the configured root"
+      end
+      if i == #parts then
+        return nil, "file already exists; choose it from the picker"
+      end
+      local parent = uv.fs_stat(real)
+      if not parent or parent.type ~= "directory" then
+        return nil, "parent is not a directory"
+      end
+      path = real
+    end
+  end
+  return path
+end
+
+local function create_destination(roots, on_choice)
+  local dirs, seen = {}, {}
+  for _, root in ipairs(roots or {}) do
+    local real = uv.fs_realpath(files.normalize(root) or "")
+    local stat = real and uv.fs_stat(real)
+    if stat and stat.type == "directory" and not seen[real] then
+      dirs[#dirs + 1], seen[real] = real, true
+    end
+  end
+  local function choose_name(root)
+    if not root then
+      return on_choice(nil)
+    end
+    if not seen[root] then
+      vim.notify("tino: root was not offered by the picker", vim.log.levels.WARN)
+      return on_choice(nil)
+    end
+    vim.ui.input({ prompt = "New Markdown file (relative path): " }, function(name)
+      if name == nil then
+        return on_choice(nil)
+      end
+      local path, err = M.new_path(root, name)
+      if not path then
+        vim.notify("tino: " .. err, vim.log.levels.WARN)
+        return on_choice(nil)
+      end
+      -- Create only parent directories; the new Markdown file stays unsaved.
+      local parent = vim.fn.fnamemodify(path, ":h")
+      if not uv.fs_stat(parent) then
+        local ok = pcall(vim.fn.mkdir, parent, "p")
+        if not ok or not uv.fs_stat(parent) then
+          vim.notify("tino: cannot create destination directory", vim.log.levels.WARN)
+          return on_choice(nil)
+        end
+      end
+      local buf, berr = files.buffer_for(path)
+      if berr then
+        vim.notify("tino: " .. berr, vim.log.levels.WARN)
+        return on_choice(nil)
+      end
+      local ok
+      if not buf then
+        ok, buf = pcall(vim.fn.bufadd, path)
+        if not ok or type(buf) ~= "number" or buf <= 0 then
+          return on_choice(nil)
+        end
+        ok = pcall(vim.fn.bufload, buf)
+        if not ok or not vim.api.nvim_buf_is_loaded(buf) then
+          vim.notify("tino: cannot load new destination", vim.log.levels.WARN)
+          return on_choice(nil)
+        end
+      end
+      if M.new_path(root, name) ~= path
+        or files.realpath(vim.api.nvim_buf_get_name(buf)) ~= path or uv.fs_lstat(path) then
+        vim.notify("tino: new destination changed while opening", vim.log.levels.WARN)
+        return on_choice(nil)
+      end
+      vim.bo[buf].buflisted = true
+      on_choice(path, true)
+    end)
+  end
+  if #dirs == 0 then
+    vim.notify("tino: no directory roots configured", vim.log.levels.WARN)
+    return on_choice(nil)
+  elseif #dirs == 1 then
+    choose_name(dirs[1])
+  else
+    vim.ui.select(dirs, { prompt = "Create file in root:" }, choose_name)
+  end
+end
+
+-- Destination chooser for notes/capture/refile. Refile supplies its already
+-- snapshotted paths; other callers reuse the normal Markdown discovery.
+function M.select_destination(roots, opts, on_choice)
+  opts = opts or {}
+  local paths = opts.paths
+  if not paths then
+    local errors
+    paths, errors = files.collect(roots)
+    for _, err in ipairs(errors or {}) do
+      vim.notify("tino: root " .. err.path .. ": " .. err.message, vim.log.levels.WARN)
+    end
+  end
+  M.select_files(paths, { prompt = opts.prompt or "Destination:", create_new = true }, function(choice)
+    if choice == CREATE then
+      create_destination(roots, on_choice)
+    else
+      on_choice(choice, false)
+    end
   end)
 end
 

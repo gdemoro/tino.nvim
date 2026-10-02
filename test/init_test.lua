@@ -25,6 +25,7 @@ local function fresh_config()
     done_timestamp = true,
     roots = {},
     inbox = nil,
+    note_inbox = nil,
   }
 end
 
@@ -36,6 +37,7 @@ H.describe("configuration", function()
     H.eq(md.config.done_timestamp, true)
     H.eq(md.config.completed_states.DONE, true)
     H.eq(md.config.inbox, nil)
+    H.eq(md.config.note_inbox, nil)
     H.assert(vim.fn.exists(":TinoCycle") == 2, "cycle command exists")
     H.assert(vim.fn.exists(":TinoPriority") == 2, "priority command exists")
     H.assert(vim.fn.exists(":TinoAgenda") == 2, "lazy agenda command exists")
@@ -76,6 +78,8 @@ H.describe("configuration", function()
       H.eq(md.setup({ priorities = { "AB" } }), false)
       H.eq(md.setup({ done_timestamp = "yes" }), false)
       H.eq(md.setup({ completed_states = { "NOPE" } }), false)
+      H.eq(md.setup({ note_inbox = false }), false)
+      H.eq(md.setup({ note_inbox = "" }), false)
     end)
   end)
 
@@ -97,16 +101,17 @@ H.describe("configuration", function()
     H.eq(md.config.completed_states.CANCELLED, true)
   end)
 
-  H.it("normalizes ~ roots and inbox using the process HOME", function()
+  H.it("normalizes ~ roots, inbox and note_inbox using the process HOME", function()
     local stub = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/tmp/home_setup"
     local orig = vim.env.HOME
     vim.env.HOME = stub
     fresh_config()
-    local ok = md.setup({ roots = { "~/notes" }, inbox = "~/inbox.md" })
+    local ok = md.setup({ roots = { "~/notes" }, inbox = "~/inbox.md", note_inbox = "~/notes.md" })
     vim.env.HOME = orig
     H.eq(ok, true)
     H.eq(md.config.roots[1], stub .. "/notes")
     H.eq(md.config.inbox, stub .. "/inbox.md")
+    H.eq(md.config.note_inbox, stub .. "/notes.md")
   end)
 
   H.it("rejects a completed first state (capture default must be active)", function()
@@ -118,7 +123,7 @@ H.describe("configuration", function()
 end)
 
 H.describe("command registration", function()
-  local required = { "TinoCycle", "TinoPriority", "TinoDone", "TinoTodo", "TinoState", "TinoDue", "TinoCapture", "TinoAgenda", "TinoRefile", "TinoFiles" }
+  local required = { "TinoCycle", "TinoPriority", "TinoDone", "TinoTodo", "TinoState", "TinoDue", "TinoCapture", "TinoAgenda", "TinoRefile", "TinoFiles", "TinoNote", "TinoNoteTo", "TinoNoteRefile", "TinoCaptureTo" }
 
   H.it("registers exactly the required commands and no legacy aliases", function()
     fresh_config()
@@ -284,7 +289,7 @@ H.describe("plugin bootstrap", function()
     vim.g.tino_commands_registered = nil
     vim.cmd("source " .. vim.fn.fnameescape(plugin_path))
     H.eq(vim.g.loaded_tino, 1, "bootstrap sets loaded guard")
-    for _, name in ipairs({ "TinoCycle", "TinoPriority", "TinoDone", "TinoTodo", "TinoState", "TinoDue", "TinoCapture", "TinoAgenda", "TinoRefile", "TinoFiles" }) do
+    for _, name in ipairs({ "TinoCycle", "TinoPriority", "TinoDone", "TinoTodo", "TinoState", "TinoDue", "TinoCapture", "TinoAgenda", "TinoRefile", "TinoFiles", "TinoNote", "TinoNoteTo", "TinoNoteRefile", "TinoCaptureTo" }) do
       H.eq(vim.fn.exists(":" .. name), 2, "bootstrap registers " .. name)
     end
   end)
