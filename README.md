@@ -271,7 +271,16 @@ vim.keymap.set("n", "<leader>ta", "<cmd>TinoAgenda<cr>",   { desc = "tino: agend
 vim.keymap.set("n", "<leader>tr", "<cmd>TinoRefile<cr>",   { desc = "tino: refile" })
 vim.keymap.set("n", "<leader>ti", "<cmd>TinoCapture<cr>",  { desc = "tino: capture" })
 vim.keymap.set("n", "<leader>tu", "<cmd>TinoDue<cr>",      { desc = "tino: set due date" })
+vim.keymap.set(
+  "v",
+  "<leader>tR",
+  ":'<,'>TinoNoteRefile<cr>",
+  { desc = "tino: refile note selection" }
+)
 ```
+
+`TinoNoteRefile` must be invoked with a real Visual range, and Visual mappings
+should pass `'<,'>` explicitly.
 
 ## Timestamps
 
