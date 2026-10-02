@@ -4,8 +4,11 @@
 --   <marker><ws>+<checkbox><ws>+<STATE>[[#P]]?<ws>+<text>[<ws>+<metadata>]*<ws>*
 --   marker   : "-", "*", "+" or one-or-more digits followed by "." or ")"
 --   checkbox : "[ ]" | "[/]" | "[~]" | "[x]" | "[X]" | "[-]"
---                (visual cue only; the STATE token is authoritative)
---   STATE    : exactly one configured uppercase token [A-Z][A-Z0-9_-]*
+--                (visual cue; an explicit STATE token is authoritative)
+--   STATE    : optional configured uppercase token [A-Z][A-Z0-9_-]*, delimited
+--              by whitespace or end-of-line. When absent the checkbox marker
+--              infers the state (marker-only task); the word is written back
+--              by the mutation helpers.
 --   [#P]     : optional single configured uppercase-letter priority cookie
 --   metadata : optional single @due(YYYY-MM-DD) and/or @done(YYYY-MM-DD HH:MM)
 --              in either order at the end of the description
@@ -13,6 +16,17 @@
 -- parse() returns nil for non-tasks and malformed/ambiguous metadata.
 
 local M = {}
+
+-- Marker-only inference: the checkbox selects the built-in state when no
+-- explicit configured state word is present.
+local CHECKBOX_STATE = {
+  ["[ ]"] = "TODO",
+  ["[/]"] = "DOING",
+  ["[~]"] = "WAITING",
+  ["[x]"] = "DONE",
+  ["[X]"] = "DONE",
+  ["[-]"] = "CANCELLED",
+}
 
 local defaults = {
   states = { "TODO", "DOING", "WAITING", "DONE", "CANCELLED" },
@@ -208,23 +222,41 @@ function M.parse(line, config)
     return nil
   end
 
-  -- state
-  local st_s, st_e = line:find("^[A-Z][A-Z0-9_%-]*", k)
-  if not st_s then
-    return nil
+  -- state: an explicit configured state word (delimited by whitespace or
+  -- end-of-line) is authoritative; otherwise the checkbox marker infers the
+  -- state and the word is written back on the next rewrite.
+  local state, st_s, st_e
+  local implicit = false
+  local cand_s, cand_e = line:find("^[A-Z][A-Z0-9_%-]*", k)
+  if cand_s and contains(config.states, line:sub(cand_s, cand_e)) then
+    local after = cand_e + 1
+    if after > n or is_hws(line:sub(after, after)) then
+      state = line:sub(cand_s, cand_e)
+      st_s, st_e = cand_s, cand_e
+      k = after
+    end
   end
-  local state = line:sub(st_s, st_e)
-  if not contains(config.states, state) then
-    return nil
+  if not state then
+    implicit = true
+    state = CHECKBOX_STATE[cb]
+    -- The inferred state must be configured; otherwise cycle_state and the
+    -- completion role would be handed a state the config does not know.
+    if not contains(config.states, state) then
+      return nil
+    end
+    -- zero-width span just after the checkbox: the insertion point for the
+    -- explicit word written by the mutation helpers.
+    st_s, st_e = cb_e + 1, cb_e
   end
-  k = st_e + 1
 
-  local ws2 = k
-  while k <= n and is_hws(line:sub(k, k)) do
-    k = k + 1
-  end
-  if k == ws2 then
-    return nil
+  if not implicit then
+    local ws2 = k
+    while k <= n and is_hws(line:sub(k, k)) do
+      k = k + 1
+    end
+    if k == ws2 then
+      return nil
+    end
   end
 
   -- optional priority cookie [#P]
@@ -326,6 +358,7 @@ function M.parse(line, config)
   return {
     line = original,
     state = state,
+    implicit_state = implicit,
     checked = complete,
     priority = priority,
     text = text,

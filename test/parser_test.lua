@@ -72,6 +72,24 @@ H.describe("parser states and markers", function()
     end
   end)
 
+  H.it("infers the state from the checkbox when no state word is present", function()
+    local cases = {
+      { "- [ ] wash dishes", "TODO", "wash dishes" },
+      { "- [/] wash dishes", "DOING", "wash dishes" },
+      { "- [~] aspettare risposta", "WAITING", "aspettare risposta" },
+      { "- [x] wash dishes", "DONE", "wash dishes" },
+      { "- [X] wash dishes", "DONE", "wash dishes" },
+      { "- [-] wash dishes", "CANCELLED", "wash dishes" },
+    }
+    for _, c in ipairs(cases) do
+      local t = parse(c[1])
+      H.assert(t, "expected marker-only task: " .. c[1])
+      H.eq(t.state, c[2], c[1])
+      H.eq(t.text, c[3], c[1])
+      H.eq(t.implicit_state, true, c[1])
+    end
+  end)
+
   H.it("accepts *, + and ordered markers", function()
     for _, m in ipairs({ "*", "+", "1.", "2)", "10." }) do
       local t = parse(m .. " [ ] TODO x")
@@ -94,11 +112,6 @@ H.describe("parser states and markers", function()
 end)
 
 H.describe("parser rejections", function()
-  H.it("rejects plain checkbox without configured state", function()
-    H.eq(parse("- [ ] just a checkbox"), nil)
-    H.eq(parse("- [x] done but no state"), nil)
-  end)
-
   H.it("rejects non-task lines", function()
     H.eq(parse("- not a task"), nil)
     H.eq(parse("# heading"), nil)
@@ -270,8 +283,20 @@ H.describe("parser completed-state semantics", function()
   end)
 
   H.it("validates states against the configured list", function()
-    H.eq(parse("- [ ] DOINGx work"), nil, "not a configured state")
+    local t = parse("- [ ] DOINGx work")
+    H.assert(t, "not a configured state word -> marker-only")
+    H.eq(t.state, "TODO")
+    H.eq(t.text, "DOINGx work")
     H.assert(parse("- [ ] DONE work"), "state word is authoritative over marker")
+    -- An inferred state outside a custom configured list is rejected.
+    local custom = {
+      states = { "TODO", "DONE" },
+      priorities = { "A" },
+      completed_states = { DONE = true },
+      done_timestamp = true,
+    }
+    H.eq(parser.parse("- [~] infer outside list", custom), nil)
+    H.assert(parser.parse("- [x] infer inside list", custom), "inferred DONE stays valid")
   end)
 end)
 

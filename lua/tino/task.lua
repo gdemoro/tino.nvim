@@ -67,13 +67,38 @@ local function hws_after(line, offset)
   return pos
 end
 
+-- Canonical state/checkbox sync edits. An explicit state token is rewritten
+-- in place; a marker-only task (no word yet) gains "<ws><state>" inserted
+-- just after the checkbox.
+local function state_sync_edits(config, task, state)
+  local complete = is_completed(config, state)
+  local marker = STATE_MARKER[state] or (complete and "[x]" or "[ ]")
+  local edits = {
+    { task.spans.checkbox[1], task.spans.checkbox[2], marker },
+  }
+  if task.implicit_state then
+    edits[#edits + 1] = { task.spans.state[1], task.spans.state[2], " " .. state }
+  else
+    edits[#edits + 1] = { task.spans.state[1], task.spans.state[2], state }
+  end
+  return edits
+end
+
 -- Apply non-overlapping span edits on a single row, right-to-left, after
--- verifying the live line still matches the originally parsed line.
-local function apply(bufnr, row, original, edits)
+-- verifying the live line still matches the originally parsed line. Unless the
+-- caller already supplied synchronized state/checkbox edits (`state_change`),
+-- the parsed state and its canonical marker are normalized as part of every
+-- rewrite, so marker-only tasks gain their explicit word here.
+local function apply(bufnr, row, task, edits, config, state_change)
   local current = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
-  if current ~= original then
+  if current ~= task.line then
     notify("task changed since parse; aborting", vim.log.levels.WARN)
     return false
+  end
+  if not state_change and config then
+    for _, e in ipairs(state_sync_edits(config, task, task.state)) do
+      edits[#edits + 1] = e
+    end
   end
   table.sort(edits, function(a, b)
     return a[1] > b[1]
@@ -113,11 +138,7 @@ end
 -- state with done_timestamp enabled.
 local function state_transition_edits(config, task, newstate)
   local complete = is_completed(config, newstate)
-  local marker = STATE_MARKER[newstate] or (complete and "[x]" or "[ ]")
-  local edits = {
-    { task.spans.state[1], task.spans.state[2], newstate },
-    { task.spans.checkbox[1], task.spans.checkbox[2], marker },
-  }
+  local edits = state_sync_edits(config, task, newstate)
   if complete then
     if not task.done_timestamp and config.done_timestamp then
       edits[#edits + 1] = {
@@ -171,7 +192,7 @@ function M.cycle_state(bufnr, row, config)
     return false
   end
   local newstate = states[idx % #states + 1]
-  return apply(bufnr, row, line, state_transition_edits(config, task, newstate))
+  return apply(bufnr, row, task, state_transition_edits(config, task, newstate), config, true)
 end
 
 -- Directly set the task state to `state`, bypassing cycle order. The target
@@ -213,7 +234,7 @@ function M.set_state(bufnr, row, state, config)
     notify("not a valid task", vim.log.levels.WARN)
     return false
   end
-  return apply(bufnr, row, line, state_transition_edits(config, task, state))
+  return apply(bufnr, row, task, state_transition_edits(config, task, state), config, true)
 end
 
 -- Shared guard for the literal direct setters: the target token must be a
@@ -273,12 +294,12 @@ function M.set_due(bufnr, row, input, config)
       return true
     end
     -- Remove exactly one separator byte; preserve other user whitespace.
-    return apply(bufnr, row, task.line, { { span[1] - 1, span[2], "" } })
+    return apply(bufnr, row, task, { { span[1] - 1, span[2], "" } }, config)
   elseif span then
-    return apply(bufnr, row, task.line, { { span[1], span[2], "@due(" .. date .. ")" } })
+    return apply(bufnr, row, task, { { span[1], span[2], "@due(" .. date .. ")" } }, config)
   end
   local finish = metadata_end(task)
-  return apply(bufnr, row, task.line, { { finish, finish, " @due(" .. date .. ")" } })
+  return apply(bufnr, row, task, { { finish, finish, " @due(" .. date .. ")" } }, config)
 end
 
 function M.prompt_due(bufnr, row, config)
@@ -369,7 +390,7 @@ function M.cycle_priority(bufnr, row, config)
     local start = hws_after(line, task.spans.state[2])
     edits[#edits + 1] = { start, start, "[#" .. priorities[1] .. "] " }
   end
-  return apply(bufnr, row, line, edits)
+  return apply(bufnr, row, task, edits, config)
 end
 
 return M

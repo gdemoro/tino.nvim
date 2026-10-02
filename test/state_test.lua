@@ -103,6 +103,21 @@ H.describe("task.set_state", function()
     H.eq(get(b), "- [/] DOING x", "marker and word resynced from the word")
   end)
 
+  H.it("normalizes marker-only and conflicting lines on a same-state set", function()
+    local cases = {
+      { "- [~] aspettare risposta", "WAITING", "- [~] WAITING aspettare risposta" },
+      { "- [~] TODO prova", "TODO", "- [ ] TODO prova" },
+    }
+    for _, c in ipairs(cases) do
+      local b = make_buf(c[1])
+      local parsed = task.parse_at(b, 0, config)
+      H.assert(parsed, "expected parsed task: " .. c[1])
+      H.eq(parsed.state, c[2], c[1])
+      H.assert(task.set_state(b, 0, parsed.state, config), c[1])
+      H.eq(get(b), c[3], c[1])
+    end
+  end)
+
   H.it("preserves indentation, marker, priority, description and CR", function()
     local b = make_buf("  1. [ ] DOING [#B] Fix it\r")
     H.assert(task.set_state(b, 0, "DONE", config))
@@ -146,7 +161,7 @@ H.describe("task.set_state", function()
     for _, line in ipairs({
       "hello world",
       "- TODO x", -- keyword-only, not a task
-      "- [ ] TODOx y", -- no separator before text
+      "- [ ]TODOx y", -- no separator before text
     }) do
       local b = make_buf(line)
       local notices = with_notify(function()

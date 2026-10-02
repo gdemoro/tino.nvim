@@ -137,6 +137,16 @@ H.describe("task.cycle_priority", function()
     end
   end)
 
+  H.it("normalizes marker-only and conflicting lines on a non-state rewrite", function()
+    local b = make_buf("- [~] aspettare risposta")
+    H.assert(task.cycle_priority(b, 0, config))
+    H.eq(get(b), "- [~] WAITING [#A] aspettare risposta")
+
+    local b2 = make_buf("- [~] TODO prova")
+    H.assert(task.cycle_priority(b2, 0, config))
+    H.eq(get(b2), "- [ ] TODO [#A] prova")
+  end)
+
   H.it("removes the cookie and only one adjacent whitespace byte", function()
     local b = make_buf("- [ ] TODO [#C]   wide")
     H.assert(task.cycle_priority(b, 0, config))
