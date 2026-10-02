@@ -23,6 +23,17 @@ local function is_hws_byte(c)
   return c == " " or c == "\t"
 end
 
+-- Canonical visual marker written alongside each built-in state token. Custom
+-- states fall back to the completed/active checkbox pair so configured state
+-- names keep their prior rendering.
+local STATE_MARKER = {
+  TODO = "[ ]",
+  DOING = "[/]",
+  WAITING = "[~]",
+  DONE = "[x]",
+  CANCELLED = "[-]",
+}
+
 -- True when the buffer row lies inside / is a fenced code block delimiter,
 -- using the shared parser scan.
 local function row_fenced(bufnr, row)
@@ -102,9 +113,10 @@ end
 -- state with done_timestamp enabled.
 local function state_transition_edits(config, task, newstate)
   local complete = is_completed(config, newstate)
+  local marker = STATE_MARKER[newstate] or (complete and "[x]" or "[ ]")
   local edits = {
     { task.spans.state[1], task.spans.state[2], newstate },
-    { task.spans.checkbox[1], task.spans.checkbox[2], complete and "[x]" or "[ ]" },
+    { task.spans.checkbox[1], task.spans.checkbox[2], marker },
   }
   if complete then
     if not task.done_timestamp and config.done_timestamp then

@@ -147,7 +147,7 @@ H.describe("command registration", function()
     vim.api.nvim_set_current_buf(b)
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
     vim.cmd("TinoCycle")
-    H.eq(vim.api.nvim_buf_get_lines(b, 0, 1, false)[1], "- [ ] DOING command cycle")
+    H.eq(vim.api.nvim_buf_get_lines(b, 0, 1, false)[1], "- [/] DOING command cycle")
   end)
 
   H.it("TinoPriority mutates the task on the current line", function()

@@ -89,9 +89,18 @@ H.describe("task.set_state", function()
   H.it("keeps the checkbox consistent with the completed role", function()
     local b = make_buf("- [ ] DOING x")
     H.assert(task.set_state(b, 0, "CANCELLED", config))
-    H.assert(get(b):match("^%- %[x%] CANCELLED x"), "active -> completed checks box")
+    H.assert(get(b):match("^%- %[%-%] CANCELLED x"), "active -> completed checks box")
     H.assert(task.set_state(b, 0, "DOING", config))
-    H.eq(get(b), "- [ ] DOING x", "completed -> active clears box and timestamp")
+    H.eq(get(b), "- [/] DOING x", "completed -> active clears box and timestamp")
+  end)
+
+  H.it("normalizes an inconsistent marker/state pair from the state word", function()
+    -- Marker claims DONE but the authoritative word is DOING.
+    local b = make_buf("- [x] DOING x @done(2026-10-01 13:15)")
+    local parsed = task.parse_at(b, 0, config)
+    H.eq(parsed.state, "DOING", "state word is authoritative")
+    H.assert(task.set_state(b, 0, parsed.state, config))
+    H.eq(get(b), "- [/] DOING x", "marker and word resynced from the word")
   end)
 
   H.it("preserves indentation, marker, priority, description and CR", function()
@@ -138,8 +147,6 @@ H.describe("task.set_state", function()
       "hello world",
       "- TODO x", -- keyword-only, not a task
       "- [ ] TODOx y", -- no separator before text
-      "- [x] TODO x", -- checkbox/state mismatch
-      "- [ ] DONE x", -- checkbox/state mismatch
     }) do
       local b = make_buf(line)
       local notices = with_notify(function()

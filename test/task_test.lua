@@ -45,16 +45,16 @@ H.describe("task.cycle_state", function()
   H.it("cycles through every state and back, syncing checkbox/timestamp", function()
     local b = make_buf("- [ ] TODO Fix " .. ROCKET)
     H.assert(task.cycle_state(b, 0, config))
-    H.eq(get(b), "- [ ] DOING Fix " .. ROCKET, "TODO->DOING")
+    H.eq(get(b), "- [/] DOING Fix " .. ROCKET, "TODO->DOING")
     H.assert(task.cycle_state(b, 0, config))
-    H.eq(get(b), "- [ ] WAITING Fix " .. ROCKET, "DOING->WAITING")
+    H.eq(get(b), "- [~] WAITING Fix " .. ROCKET, "DOING->WAITING")
     H.assert(task.cycle_state(b, 0, config))
     local done = get(b)
     H.assert(done:match("^%- %[x%] DONE Fix " .. ROCKET .. TS_PAT), "WAITING->DONE: " .. done)
     H.assert(task.cycle_state(b, 0, config))
     local cancelled = get(b)
     H.assert(
-      cancelled:match("^%- %[x%] CANCELLED Fix " .. ROCKET .. TS_PAT),
+      cancelled:match("^%- %[%-%] CANCELLED Fix " .. ROCKET .. TS_PAT),
       "DONE->CANCELLED: " .. cancelled
     )
     H.assert(task.cycle_state(b, 0, config))
@@ -82,13 +82,13 @@ H.describe("task.cycle_state", function()
     task.cycle_state(b, 0, cfg) -- DONE
     H.eq(get(b), "- [x] DONE x")
     task.cycle_state(b, 0, cfg) -- CANCELLED
-    H.eq(get(b), "- [x] CANCELLED x")
+    H.eq(get(b), "- [-] CANCELLED x")
   end)
 
   H.it("preserves priority, marker, indentation and Unicode", function()
     local b = make_buf("  1. [ ] TODO [#B] " .. CAFE .. " " .. ROCKET)
     H.assert(task.cycle_state(b, 0, config))
-    H.eq(get(b), "  1. [ ] DOING [#B] " .. CAFE .. " " .. ROCKET)
+    H.eq(get(b), "  1. [/] DOING [#B] " .. CAFE .. " " .. ROCKET)
   end)
 end)
 
@@ -188,7 +188,7 @@ H.describe("task fence eligibility", function()
   H.it("preserves a terminal CR through a state cycle", function()
     local b = make_buf("- [ ] TODO x\r")
     H.assert(task.cycle_state(b, 0, config))
-    H.eq(get(b), "- [ ] DOING x\r")
+    H.eq(get(b), "- [/] DOING x\r")
   end)
 end)
 

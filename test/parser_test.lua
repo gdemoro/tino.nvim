@@ -57,15 +57,19 @@ H.describe("parser grammar", function()
 end)
 
 H.describe("parser states and markers", function()
-  H.it("parses every configured state with matching checkbox", function()
-    local active = { TODO = true, DOING = true, WAITING = true }
+  H.it("parses every configured state with its canonical marker", function()
+    local markers = {
+      TODO = "[ ]",
+      DOING = "[/]",
+      WAITING = "[~]",
+      DONE = "[x]",
+      CANCELLED = "[-]",
+    }
     for _, state in ipairs(config.states) do
-      local box = (state == "DONE" or state == "CANCELLED") and "[x]" or "[ ]"
-      local t = parse("- " .. box .. " " .. state .. " work")
+      local t = parse("- " .. markers[state] .. " " .. state .. " work")
       H.assert(t, "expected task for " .. state)
       H.eq(t.state, state)
     end
-    H.eq(active.TODO, true)
   end)
 
   H.it("accepts *, + and ordered markers", function()
@@ -113,10 +117,16 @@ H.describe("parser rejections", function()
     H.eq(parse("- [ ] TODO [#A]"), nil)
   end)
 
-  H.it("rejects state/checkbox mismatch", function()
-    H.eq(parse("- [ ] DONE text"), nil)
-    H.eq(parse("- [x] TODO text"), nil)
-    H.eq(parse("- [ ] CANCELLED text"), nil)
+  H.it("treats the state word as authoritative over the checkbox", function()
+    local t = parse("- [ ] DONE text")
+    H.assert(t, "mismatched marker still parses")
+    H.eq(t.state, "DONE")
+    local u = parse("- [/] TODO text")
+    H.assert(u, "marker/word mismatch still parses")
+    H.eq(u.state, "TODO")
+    local v = parse("- [x] CANCELLED text")
+    H.assert(v, "checked marker with completed word parses")
+    H.eq(v.state, "CANCELLED")
   end)
 
   H.it("rejects missing description", function()
@@ -184,7 +194,7 @@ H.describe("parser whitespace and Unicode", function()
     H.eq(t.priority, "H")
     H.eq(t.state, "OPEN")
     H.eq(parser.parse("- [x] CLOSED thing", c).checked, true)
-    H.eq(parser.parse("- [ ] CLOSED thing", c), nil)
+    H.assert(parser.parse("- [ ] CLOSED thing", c), "state word is authoritative")
   end)
 end)
 
@@ -243,7 +253,8 @@ H.describe("parser completed-state semantics", function()
       completed_states = { DONE = false },
       done_timestamp = true,
     }
-    H.eq(parser.parse("- [x] DONE x", c), nil, "DONE is not completed")
+    H.assert(parser.parse("- [x] DONE x", c), "DONE is an active state")
+    H.eq(parser.parse("- [x] DONE x", c).checked, false, "active despite [x]")
     H.assert(parser.parse("- [ ] DONE x", c), "DONE is an active state")
   end)
 
@@ -260,7 +271,7 @@ H.describe("parser completed-state semantics", function()
 
   H.it("validates states against the configured list", function()
     H.eq(parse("- [ ] DOINGx work"), nil, "not a configured state")
-    H.eq(parse("- [ ] DONE work"), nil, "completed needs [x]")
+    H.assert(parse("- [ ] DONE work"), "state word is authoritative over marker")
   end)
 end)
 

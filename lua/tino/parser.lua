@@ -3,7 +3,8 @@
 -- Grammar (after optional horizontal-whitespace indentation):
 --   <marker><ws>+<checkbox><ws>+<STATE>[[#P]]?<ws>+<text>[<ws>+<metadata>]*<ws>*
 --   marker   : "-", "*", "+" or one-or-more digits followed by "." or ")"
---   checkbox : "[ ]" | "[x]" | "[X]"
+--   checkbox : "[ ]" | "[/]" | "[~]" | "[x]" | "[X]" | "[-]"
+--                (visual cue only; the STATE token is authoritative)
 --   STATE    : exactly one configured uppercase token [A-Z][A-Z0-9_-]*
 --   [#P]     : optional single configured uppercase-letter priority cookie
 --   metadata : optional single @due(YYYY-MM-DD) and/or @done(YYYY-MM-DD HH:MM)
@@ -183,14 +184,17 @@ function M.parse(line, config)
     return nil
   end
 
-  -- checkbox
+  -- checkbox: an additional visual cue; the state token is authoritative, so
+  -- any recognized marker is accepted even when it disagrees with the state.
   local cb = line:sub(k, k + 2)
-  local checked
-  if cb == "[ ]" then
-    checked = false
-  elseif cb == "[x]" or cb == "[X]" then
-    checked = true
-  else
+  if
+    cb ~= "[ ]"
+    and cb ~= "[/]"
+    and cb ~= "[~]"
+    and cb ~= "[x]"
+    and cb ~= "[X]"
+    and cb ~= "[-]"
+  then
     return nil
   end
   local cb_s, cb_e = k - 1, k + 2
@@ -309,7 +313,8 @@ function M.parse(line, config)
   end
   local text = line:sub(text_start, text_end)
 
-  -- checkbox / completed-state consistency
+  -- The authoritative state token determines the completed role; the checkbox
+  -- is reconciled against it (and rewritten) by the mutation helpers.
   if not completed_set_valid(config.completed_states) then
     return nil -- unsupported completed_states value
   end
@@ -317,14 +322,11 @@ function M.parse(line, config)
   if not valid then
     return nil -- unsupported completed_states value
   end
-  if complete ~= checked then
-    return nil
-  end
 
   return {
     line = original,
     state = state,
-    checked = checked,
+    checked = complete,
     priority = priority,
     text = text,
     done_timestamp = metadata.done,

@@ -116,7 +116,7 @@ H.describe("deadline parser", function()
     H.eq(parser.parse("- [x] DONE x @done(abc) @done(2024-01-01 10:00)", config).text, "x @done(abc)")
     local custom = { states = { "OPEN", "CLOSED" }, priorities = { "H" }, completed_states = { "CLOSED" } }
     H.eq(parser.parse("- [ ] OPEN [#H] work @due(2024-02-29)", custom).due_date, "2024-02-29")
-    H.eq(parser.parse("- [ ] CLOSED work @due(2024-02-29)", custom), nil)
+    H.eq(parser.parse("- [ ] CLOSED work @due(2024-02-29)", custom).state, "CLOSED")
   end)
 end)
 
