@@ -266,9 +266,76 @@ function M.set_done(bufnr, row, config)
   return direct_set(bufnr, row, "DONE", true, config)
 end
 
+-- Promote a non-task line into a TODO task, preserving the original text,
+-- its leading indentation and a terminal CR. A blank/whitespace-only line, or
+-- a line that already looks like a list item (a malformed or unsupported
+-- task), is left untouched rather than double-prefixed.
+local function plain_text_task(bufnr, row, line)
+  local body = line
+  local cr = ""
+  if body:sub(-1) == "\r" then
+    cr = "\r"
+    body = body:sub(1, -2)
+  end
+  if body:match("^[ \t]*$") then
+    return false
+  end
+  if body:match("^[ \t]*[%-%*%+]%s") or body:match("^[ \t]*%d+[%.%)]%s") then
+    return false
+  end
+  local indent = body:match("^[ \t]*") or ""
+  local new = indent .. "- [ ] TODO " .. body:sub(#indent + 1) .. cr
+  vim.api.nvim_buf_set_lines(bufnr, row, row + 1, false, { new })
+  return true
+end
+
 -- :TinoTodo - set the current task keyword to the literal "TODO".
+--
+-- Only this command is broadened: a marker-only supported Markdown task keeps
+-- its inferred state (its explicit word is normalized instead of forced to
+-- TODO), and a nonempty plain-text line is promoted to a TODO task. An
+-- explicit-state task keeps the literal direct-set behavior. The other
+-- commands and M.set_state are unchanged.
 function M.set_todo(bufnr, row, config)
-  return direct_set(bufnr, row, "TODO", false, config)
+  config = resolve_config(config)
+  bufnr = bufnr or 0
+  if not editable(bufnr) then
+    return false
+  end
+  -- Same configured-state validation as the literal direct setter.
+  local known = false
+  for _, s in ipairs(config.states) do
+    if s == "TODO" then
+      known = true
+      break
+    end
+  end
+  if not known then
+    notify("state TODO is not configured", vim.log.levels.WARN)
+    return false
+  end
+  if is_completed(config, "TODO") then
+    notify("TODO has an incompatible completion role", vim.log.levels.WARN)
+    return false
+  end
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+  if not line then
+    return false
+  end
+  if row_fenced(bufnr, row) then
+    notify("inside fenced code block", vim.log.levels.WARN)
+    return false
+  end
+  local task = parser.parse(line, config)
+  if task and not task.implicit_state then
+    return M.set_state(bufnr, row, "TODO", config)
+  end
+  if task then
+    -- Marker-only task: reuse the shared normalization to keep the inferred
+    -- state and write its canonical word, instead of forcing TODO.
+    return apply(bufnr, row, task, {}, config)
+  end
+  return plain_text_task(bufnr, row, line)
 end
 
 -- Set, replace or remove only the managed deadline and its separator.

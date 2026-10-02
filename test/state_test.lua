@@ -291,9 +291,28 @@ H.describe("TinoDone / TinoTodo commands", function()
     H.eq(line, "- [ ] TODO finish")
   end)
 
-  H.it("TinoTodo/TinoDone leave non-task lines untouched", function()
+  H.it("TinoTodo promotes plain text on the current line to a TODO task", function()
     fresh()
-    H.eq(run("TinoTodo", "just prose"), "just prose")
+    H.eq(run("TinoTodo", "test"), "- [ ] TODO test")
+  end)
+
+  H.it("TinoTodo normalizes marker-only tasks to their inferred state", function()
+    fresh()
+    local cases = {
+      { "- [ ] test", "- [ ] TODO test" },
+      { "- [/] test", "- [/] DOING test" },
+      { "- [~] test", "- [~] WAITING test" },
+      { "- [x] test", "- [x] DONE test" },
+      { "- [-] test", "- [-] CANCELLED test" },
+      { "- [X] test", "- [x] DONE test" },
+    }
+    for _, case in ipairs(cases) do
+      H.eq(run("TinoTodo", case[1]), case[2])
+    end
+  end)
+
+  H.it("TinoDone leaves non-task lines untouched", function()
+    fresh()
     H.eq(run("TinoDone", "- DONE prose"), "- DONE prose")
   end)
 end)
