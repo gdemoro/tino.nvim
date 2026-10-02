@@ -316,3 +316,124 @@ H.describe("TinoDone / TinoTodo commands", function()
     H.eq(run("TinoDone", "- DONE prose"), "- DONE prose")
   end)
 end)
+
+H.describe("TinoState command", function()
+  local TS_PAT = " @done%(%d%d%d%d%-%d%d%-%d%d %d%d:%d%d%)$"
+
+  local function fresh()
+    vim.g.tino_commands_registered = nil
+    md.config = {
+      states = { "TODO", "DOING", "WAITING", "DONE", "CANCELLED" },
+      priorities = { "A", "B", "C" },
+      completed_states = { DONE = true, CANCELLED = true },
+      done_timestamp = true,
+      roots = {},
+      inbox = nil,
+    }
+    md.setup()
+  end
+
+  -- Stub the built-in prompt; `label` nil models dismissal (cancellation).
+  local function with_select(label, fn)
+    local orig = vim.ui.select
+    vim.ui.select = function(items, opts, on_choice)
+      H.assert(type(opts.prompt) == "string", "prompt provided")
+      local idx
+      if label ~= nil then
+        for i, it in ipairs(items) do
+          if it == label then
+            idx = i
+            break
+          end
+        end
+        H.assert(idx, "no select entry: " .. tostring(label))
+      end
+      on_choice(label ~= nil and items[idx] or nil, idx)
+    end
+    local ok, err = pcall(fn)
+    vim.ui.select = orig
+    if not ok then
+      error(err, 2)
+    end
+  end
+
+  local function run(label, line)
+    local b = vim.api.nvim_create_buf(true, true)
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, { line })
+    vim.api.nvim_set_current_buf(b)
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    with_select(label, function()
+      vim.cmd("TinoState")
+    end)
+    return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1]
+  end
+
+  H.it("registers TinoState", function()
+    fresh()
+    H.eq(vim.fn.exists(":TinoState"), 2, "TinoState exists")
+  end)
+
+  H.it("directly sets the chosen state on an existing task", function()
+    fresh()
+    local full = "- [x] DONE [#B] fix bug @owner(alice) @due(2026-02-01) @done(2026-10-01 13:15)"
+    local cases = {
+      -- Direct choice from a completed task to every active state: the managed
+      -- timestamp is dropped, the marker/word resynced, text/priority/due and
+      -- the unrelated @owner token all retained.
+      { "t -> TODO", full, "- [ ] TODO [#B] fix bug @owner(alice) @due(2026-02-01)" },
+      { "d -> DOING", full, "- [/] DOING [#B] fix bug @owner(alice) @due(2026-02-01)" },
+      { "w -> WAITING", full, "- [~] WAITING [#B] fix bug @owner(alice) @due(2026-02-01)" },
+      -- Completed -> completed keeps the existing timestamp verbatim.
+      { "c -> CANCELLED", full, "- [-] CANCELLED [#B] fix bug @owner(alice) @due(2026-02-01) @done(2026-10-01 13:15)" },
+      -- Same-state DONE is idempotent and keeps the timestamp verbatim.
+      { "x -> DONE", full, full },
+      -- Marker-only task gains its explicit word and canonical marker.
+      { "d -> DOING", "- [~] aspettare risposta", "- [/] DOING aspettare risposta" },
+    }
+    for _, c in ipairs(cases) do
+      H.eq(run(c[1], c[2]), c[3], c[1] .. " from " .. c[2])
+    end
+
+    -- Active -> DONE appends exactly one fresh managed timestamp.
+    local done = run("x -> DONE", "- [/] DOING [#B] fix bug @due(2026-02-01)")
+    H.assert(done:match("^%- %[x%] DONE %[#B%] fix bug @due%(2026%-02%-01%) .. " .. TS_PAT),
+      "got: " .. done)
+  end)
+
+  H.it("promotes plain text directly into the chosen state", function()
+    fresh()
+    H.eq(run("t -> TODO", "write docs"), "- [ ] TODO write docs")
+    H.eq(run("d -> DOING", "write docs"), "- [/] DOING write docs")
+    H.eq(run("w -> WAITING", "  indented"), "  - [~] WAITING indented")
+    for _, label in ipairs({ "x -> DONE", "c -> CANCELLED" }) do
+      local line = run(label, "ship it")
+      H.assert(line:match("^%- %[[x%-]%] " .. label:sub(6) .. " ship it" .. TS_PAT), "got: " .. line)
+    end
+
+    -- done_timestamp disabled: a completed target gets no timestamp.
+    vim.g.tino_commands_registered = nil
+    md.config = {
+      states = { "TODO", "DOING", "WAITING", "DONE", "CANCELLED" },
+      priorities = { "A", "B", "C" },
+      completed_states = { DONE = true, CANCELLED = true },
+      done_timestamp = false,
+      roots = {},
+      inbox = nil,
+    }
+    md.setup()
+    H.eq(run("x -> DONE", "no ts"), "- [x] DONE no ts")
+  end)
+
+  H.it("leaves non-task, blank and list lines untouched", function()
+    fresh()
+    for _, line in ipairs({ "", "   ", "- [ ]TODOx y", "1. ordered item" }) do
+      H.eq(run("d -> DOING", line), line, "untouched: " .. vim.inspect(line))
+    end
+  end)
+
+  H.it("cancellation is a no-op", function()
+    fresh()
+    H.eq(run(nil, "- [ ] TODO keep"), "- [ ] TODO keep")
+    H.eq(run(nil, "plain text keep"), "plain text keep")
+  end)
+end)

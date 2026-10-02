@@ -266,11 +266,14 @@ function M.set_done(bufnr, row, config)
   return direct_set(bufnr, row, "DONE", true, config)
 end
 
--- Promote a non-task line into a TODO task, preserving the original text,
--- its leading indentation and a terminal CR. A blank/whitespace-only line, or
--- a line that already looks like a list item (a malformed or unsupported
--- task), is left untouched rather than double-prefixed.
-local function plain_text_task(bufnr, row, line)
+-- Promote a non-task line into a task in `state` (default TODO), preserving
+-- the original text, its leading indentation and a terminal CR. A
+-- blank/whitespace-only line, or a line that already looks like a list item
+-- (a malformed or unsupported task), is left untouched rather than
+-- double-prefixed. A completed target gains the managed timestamp when
+-- done_timestamp is enabled, matching on-task state transitions.
+local function plain_text_task(bufnr, row, line, state, config)
+  state = state or "TODO"
   local body = line
   local cr = ""
   if body:sub(-1) == "\r" then
@@ -284,7 +287,13 @@ local function plain_text_task(bufnr, row, line)
     return false
   end
   local indent = body:match("^[ \t]*") or ""
-  local new = indent .. "- [ ] TODO " .. body:sub(#indent + 1) .. cr
+  local complete = config ~= nil and is_completed(config, state)
+  local marker = STATE_MARKER[state] or (complete and "[x]" or "[ ]")
+  local ts = ""
+  if complete and config.done_timestamp then
+    ts = " @done(" .. os.date("%Y-%m-%d %H:%M") .. ")"
+  end
+  local new = indent .. "- " .. marker .. " " .. state .. " " .. body:sub(#indent + 1) .. ts .. cr
   vim.api.nvim_buf_set_lines(bufnr, row, row + 1, false, { new })
   return true
 end
@@ -335,7 +344,77 @@ function M.set_todo(bufnr, row, config)
     -- state and write its canonical word, instead of forcing TODO.
     return apply(bufnr, row, task, {}, config)
   end
-  return plain_text_task(bufnr, row, line)
+  return plain_text_task(bufnr, row, line, "TODO", config)
+end
+
+-- Built-in :TinoState choices. Each label is the exact select entry; its index
+-- maps unambiguously to the configured state token.
+local STATE_CHOICES = {
+  { label = "t -> TODO", state = "TODO" },
+  { label = "d -> DOING", state = "DOING" },
+  { label = "w -> WAITING", state = "WAITING" },
+  { label = "x -> DONE", state = "DONE" },
+  { label = "c -> CANCELLED", state = "CANCELLED" },
+}
+
+-- Direct-set worker for :TinoState. An existing task (explicit or marker-only)
+-- is set straight to `state` through the shared direct-set path; a nonempty
+-- plain-text line is promoted into a task already in `state`. The target must
+-- be a configured state. Any other line is left untouched.
+function M.set_state_or_create(bufnr, row, state, config)
+  config = resolve_config(config)
+  bufnr = bufnr or 0
+  if not editable(bufnr) then
+    return false
+  end
+  local known = false
+  for _, s in ipairs(config.states) do
+    if s == state then
+      known = true
+      break
+    end
+  end
+  if not known then
+    notify("unknown state: " .. tostring(state), vim.log.levels.WARN)
+    return false
+  end
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+  if not line then
+    return false
+  end
+  if row_fenced(bufnr, row) then
+    notify("inside fenced code block", vim.log.levels.WARN)
+    return false
+  end
+  local task = parser.parse(line, config)
+  if task then
+    return M.set_state(bufnr, row, state, config)
+  end
+  return plain_text_task(bufnr, row, line, state, config)
+end
+
+-- :TinoState - prompt once through the built-in vim.ui.select and directly set
+-- the current task (or promote plain text) to the chosen state. The target
+-- buffer and row are captured before the asynchronous callback so a later
+-- window/buffer change cannot retarget the edit. Dismissing the prompt is a
+-- no-op.
+function M.prompt_state(bufnr, row, config)
+  config = resolve_config(config)
+  bufnr = bufnr or 0
+  if bufnr == 0 then
+    bufnr = vim.api.nvim_get_current_buf()
+  end
+  local items = {}
+  for i, c in ipairs(STATE_CHOICES) do
+    items[i] = c.label
+  end
+  vim.ui.select(items, { prompt = "Set state" }, function(_, idx)
+    if idx == nil then
+      return -- cancelled
+    end
+    M.set_state_or_create(bufnr, row, STATE_CHOICES[idx].state, config)
+  end)
+  return true
 end
 
 -- Set, replace or remove only the managed deadline and its separator.

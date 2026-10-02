@@ -139,7 +139,7 @@ nothing is scanned.
 
 ## Commands
 
-All eight commands are user commands. No mappings are created by default.
+All nine commands are user commands. No mappings are created by default.
 
 | Command | Description |
 | --- | --- |
@@ -147,6 +147,7 @@ All eight commands are user commands. No mappings are created by default.
 | `:TinoPriority` | Cycle the task's priority cookie (`none -> A -> B -> C -> none`). |
 | `:TinoDone` | Set the task to `DONE` directly (bypassing the cycle): the checkbox becomes `[x]` and a managed `@done(YYYY-MM-DD HH:MM)` timestamp is added when `done_timestamp = true`. |
 | `:TinoTodo` | Set the task to `TODO` directly (bypassing the cycle): the checkbox becomes `[ ]` and any managed `@done(...)` timestamp is removed. |
+| `:TinoState` | Prompt once for a state (`t TODO`, `d DOING`, `w WAITING`, `x DONE`, `c CANCELLED`) and set the task directly to the chosen state. |
 | `:TinoDue` | Prompt for a deadline on the current task; set/replace it, or remove it with empty input. |
 | `:TinoCapture` | Prompt for text, optional priority, then optional deadline, and append a task to the inbox buffer. |
 | `:TinoAgenda` | Open a read-only agenda of all tasks under `roots`, including due dates. |
@@ -176,6 +177,14 @@ mutation command, non-task lines, keyword-only lines, lines whose checkbox does
 not match the completion role, fenced code blocks, and read-only /
 non-modifiable buffers are refused unchanged.
 
+### State chooser: `:TinoState`
+
+`:TinoState` opens a single built-in `vim.ui.select` prompt with the fixed
+choices `t -> TODO`, `d -> DOING`, `w -> WAITING`, `x -> DONE`, and
+`c -> CANCELLED`, then sets the current task (or promotes plain text) directly
+to the chosen configured state. Dismissing the prompt changes nothing; each
+choice must be a configured state, and unknown targets warn without editing.
+
 ### Deadlines: `:TinoDue` and capture
 
 `:TinoDue` accepts `YYYY-MM-DD`, `today`, `tomorrow`, `+Nd` (N days from today),
@@ -196,7 +205,8 @@ recurring tasks, scheduling or tags.
 ```lua
 vim.keymap.set("n", "<leader>td", "<cmd>TinoDone<cr>",     { desc = "tino: mark DONE" })
 vim.keymap.set("n", "<leader>tt", "<cmd>TinoTodo<cr>",     { desc = "tino: mark TODO" })
-vim.keymap.set("n", "<leader>tc", "<cmd>TinoCycle<cr>",    { desc = "tino: cycle state" })
+vim.keymap.set("n", "<leader>t<Tab>", "<cmd>TinoCycle<cr>", { desc = "tino: cycle state" })
+vim.keymap.set("n", "<leader>tc", "<cmd>TinoState<cr>",     { desc = "tino: choose state" })
 vim.keymap.set("n", "<leader>tp", "<cmd>TinoPriority<cr>", { desc = "tino: cycle priority" })
 vim.keymap.set("n", "<leader>ta", "<cmd>TinoAgenda<cr>",   { desc = "tino: agenda" })
 vim.keymap.set("n", "<leader>tr", "<cmd>TinoRefile<cr>",   { desc = "tino: refile" })
