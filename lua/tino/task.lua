@@ -393,24 +393,90 @@ function M.set_state_or_create(bufnr, row, state, config)
   return plain_text_task(bufnr, row, line, state, config)
 end
 
--- :TinoState - echo the shortcuts and read a single key, then directly set the
--- current task (or promote plain text) to the matching state. There is no
--- further confirmation. The target buffer and row are captured before the key
--- prompt so a later window/buffer change cannot retarget the edit. Esc, an
--- unrecognised key, or an interrupt is a no-op.
+-- Lines shown inside the temporary :TinoState chooser box.
+local STATE_POPUP_LINES = {
+  "  t   TODO",
+  "  d   DOING",
+  "  w   WAITING",
+  "  x   DONE",
+  "  c   CANCELLED",
+  "",
+  "  Esc cancel",
+}
+
+-- Create a small bordered, non-focusable floating box listing the shortcuts.
+-- Returns the window and its scratch buffer, or nil,nil when a float cannot be
+-- created (the key read still proceeds so behaviour never regresses). A
+-- non-focusable window keeps the source buffer current while we wait.
+local function open_state_popup()
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, STATE_POPUP_LINES)
+  vim.bo[buf].bufhidden = "wipe"
+  local width = 1
+  for _, line in ipairs(STATE_POPUP_LINES) do
+    local w = vim.fn.strdisplaywidth(line)
+    if w > width then
+      width = w
+    end
+  end
+  width = width + 2
+  local height = #STATE_POPUP_LINES
+  local columns = vim.o.columns
+  local screen_lines = vim.o.lines
+  local max_width = math.max(columns - 4, 10)
+  if width > max_width then
+    width = max_width
+  end
+  local row = math.max(math.floor((screen_lines - height) / 2) - 1, 0)
+  local col = math.max(math.floor((columns - width) / 2), 0)
+  local ok, win = pcall(vim.api.nvim_open_win, buf, false, {
+    relative = "editor",
+    row = row,
+    col = col,
+    width = width,
+    height = height,
+    style = "minimal",
+    border = "rounded",
+    focusable = false,
+    noautocmd = true,
+  })
+  if not ok then
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+    return nil, nil
+  end
+  return win, buf
+end
+
+-- Tear the temporary box down, if still alive, without touching any other
+-- window or buffer.
+local function close_state_popup(win, buf)
+  if win and vim.api.nvim_win_is_valid(win) then
+    pcall(vim.api.nvim_win_close, win, true)
+  end
+  if buf and vim.api.nvim_buf_is_valid(buf) then
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+  end
+end
+
+-- :TinoState - show the shortcuts in a temporary floating box and read a
+-- single key, then directly set the current task (or promote plain text) to
+-- the matching state. There is no further confirmation. The target buffer and
+-- row are captured before the box is shown so a later window/buffer change
+-- cannot retarget the edit. The box is closed before any state mutation, for
+-- both a selection and every cancellation/interrupt path. Esc, an unrecognised
+-- key, or an interrupt is a no-op.
 function M.prompt_state(bufnr, row, config)
   config = resolve_config(config)
   bufnr = bufnr or 0
   if bufnr == 0 then
     bufnr = vim.api.nvim_get_current_buf()
   end
-  vim.api.nvim_echo(
-    { { "Set state: t TODO  d DOING  w WAITING  x DONE  c CANCELLED (Esc to cancel)" } },
-    false,
-    {}
-  )
+  local win, popup_buf = open_state_popup()
+  -- Paint the box before blocking on the key so it is actually visible.
+  pcall(vim.cmd, "redraw")
   local ok, key = pcall(vim.fn.getcharstr)
-  vim.api.nvim_echo({ { "" } }, false, {})
+  -- Close the box before applying anything, on every path.
+  close_state_popup(win, popup_buf)
   if not ok then
     return false -- interrupted (e.g. Ctrl-C)
   end

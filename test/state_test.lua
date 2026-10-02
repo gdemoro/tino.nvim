@@ -334,12 +334,17 @@ H.describe("TinoState command", function()
   end
 
   -- Stub the one-key prompt; `key` is the returned keypress. `nil` models an
-  -- interrupt (Ctrl-C), while "\27" models Esc. Returns the number of reads.
-  local function with_key(key, fn)
+  -- interrupt (Ctrl-C), while "\27" models Esc. `on_read`, when given, runs
+  -- inside the read so the visible state during the prompt can be inspected.
+  -- Returns the number of reads.
+  local function with_key(key, fn, on_read)
     local orig = vim.fn.getcharstr
     local reads = 0
     vim.fn.getcharstr = function()
       reads = reads + 1
+      if on_read then
+        on_read()
+      end
       if key == nil then
         error("Vim:Interrupt")
       end
@@ -351,6 +356,25 @@ H.describe("TinoState command", function()
       error(err, 2)
     end
     return reads
+  end
+
+  -- All currently open floating windows with their buffer text.
+  local function floating_wins()
+    local out = {}
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      local cfg = vim.api.nvim_win_get_config(w)
+      if cfg.relative ~= "" then
+        out[#out + 1] = {
+          win = w,
+          cfg = cfg,
+          text = table.concat(
+            vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false),
+            "\n"
+          ),
+        }
+      end
+    end
+    return out
   end
 
   local function run(key, line)
@@ -436,6 +460,45 @@ H.describe("TinoState command", function()
     for _, line in ipairs({ "", "   ", "- [ ]TODOx y", "1. ordered item" }) do
       H.eq(run("d", line), line, "untouched: " .. vim.inspect(line))
     end
+  end)
+
+  H.it("shows a bordered floating box during the single key read and closes it", function()
+    fresh()
+    local b = vim.api.nvim_create_buf(true, true)
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, { "- [ ] TODO popup" })
+    vim.api.nvim_set_current_buf(b)
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+    local during
+    local reads = with_key("d", function()
+      vim.cmd("TinoState")
+    end, function()
+      during = floating_wins()
+    end)
+
+    H.eq(reads, 1, "exactly one key read")
+    H.eq(#during, 1, "one floating box during the read")
+    local box = during[1]
+    H.assert(box.cfg.border and box.cfg.border ~= "none", "box has a border")
+    H.eq(box.cfg.focusable, false, "box is non-focusable")
+    for _, token in ipairs({ "TODO", "DOING", "WAITING", "DONE", "CANCELLED" }) do
+      H.assert(box.text:find(token, 1, true), token .. " listed in the box")
+    end
+    H.eq(vim.api.nvim_get_current_buf(), b, "source buffer stays current")
+    -- The box is gone before the chosen state is applied.
+    H.eq(#floating_wins(), 0, "box closed after selection")
+    H.eq(vim.api.nvim_buf_get_lines(b, 0, 1, false)[1], "- [/] DOING popup")
+
+    -- Interrupt path also tears the box down and edits nothing.
+    local b2 = vim.api.nvim_create_buf(true, true)
+    vim.api.nvim_buf_set_lines(b2, 0, -1, false, { "- [ ] TODO keep" })
+    vim.api.nvim_set_current_buf(b2)
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    with_key(nil, function()
+      vim.cmd("TinoState")
+    end)
+    H.eq(#floating_wins(), 0, "box closed after interrupt")
+    H.eq(vim.api.nvim_buf_get_lines(b2, 0, 1, false)[1], "- [ ] TODO keep")
   end)
 
   H.it("cancellation is a no-op", function()
