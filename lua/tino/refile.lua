@@ -10,6 +10,7 @@
 
 local parser = require("tino.parser")
 local files = require("tino.files")
+local picker = require("tino.picker")
 local M = {}
 
 local uv = vim.uv or vim.loop
@@ -699,7 +700,7 @@ function M.run()
     notify("no usable destination files under configured roots", vim.log.levels.WARN)
     return false
   end
-  vim.ui.select(choices, { prompt = "Refile task to:" }, function(choice)
+  picker.select_files(choices, { prompt = "Refile task to:" }, function(choice)
     if not choice then
       return
     end

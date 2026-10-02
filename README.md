@@ -255,7 +255,10 @@ configured state order, showing state, priority, `file:line`, description and
 
 `:TinoRefile` moves the **top-level** task item under the cursor, including
 all of its nested lists, paragraphs, blank lines, and closed fenced code blocks,
-to another `.md` file chosen with `vim.ui.select` from the configured `roots`.
+to another `.md` file chosen from the recursively discovered `.md` candidates
+under the configured `roots`. The chooser prefers a Snacks file picker when a
+usable Snacks provider is present and otherwise falls back to `vim.ui.select`
+with the same candidates; no Snacks or AstroNvim dependency is required.
 
 It is the only command that requires Tree-sitter. It locates the `list_item`
 whose direct task marker exactly matches the task's row and checkbox margin,
