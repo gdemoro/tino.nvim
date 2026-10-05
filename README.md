@@ -1,24 +1,25 @@
 # tino.nvim
 
-**TINO** (**T**his **I**s **N**ot **O**rg-mode) is a small, dependency-free
-Markdown-first task plugin for Neovim. The name is a nod to what it deliberately
-is *not*: there is no Org-mode under the hood, no outlining engine, and no
-proprietary file format. It is just Markdown, a checkbox, and a state token.
+Everyone loves Org mode, right?
 
-`tino` keeps tasks in **ordinary Markdown checklist lines**. It never owns a
-separate database, index, or file format: a task is just a list item with a
-checkbox and a state token, so your notes stay valid Markdown and remain usable
-in any editor.
+Apparently not. Markdown is still the format I end up using almost everywhere.
 
-```markdown
-- [ ] TODO write the parser
-- [ ] DOING [#A] refile support
-- [ ] TODO submit the report @due(2026-10-15)
-- [x] DONE ship the README @done(2024-05-01 09:30)
-```
+Plain Markdown is great for notes, but task management in Neovim often feels
+either too minimal or too opinionated. There are already plenty of plugins for
+Markdown checkboxes and TODOs, but none matched the workflow I wanted: simple
+enough to stay out of the way, but complete enough to use for real work.
 
-The plugin is pure Lua built only on Neovim APIs. There are **no dependencies**,
-**no default global mappings**, and no background jobs or daemons.
+I wanted to create tasks quickly in the file I am already editing, give them
+priorities and due dates, move them through TODO, DOING, WAITING, DONE and
+CANCELLED, and keep track of when they were completed.
+
+From Org mode I borrowed the parts I actually missed: quick capture, an
+agenda-like overview, and easy refiling.
+
+That is basically what **TINO** (**T**his **I**s **N**ot **O**rg-mode) is.
+
+It does not try to turn Markdown into Org mode. Files remain ordinary Markdown;
+TINO only adds the workflow layer I wanted on top.
 
 ## Installation
 
@@ -96,6 +97,7 @@ structural `TinoRefile` command.
   Neovim ships one in its runtime; no `nvim-treesitter` install is required.
   If the parser is missing, refile refuses with a clear message and does nothing
   else.
+- [Pandoc](https://pandoc.org/) is required **only for `TinoExportHtml`**.
 
 ## Setup
 
@@ -140,9 +142,53 @@ code blocks (and after an unclosed fence).
 There is **no fallback** to `$HOME` or any default root: without `roots`,
 nothing is scanned.
 
+## Optional rendering: render-markdown.nvim
+
+[render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim)
+is optional, not a TINO dependency. It can display the extended task-state
+markers recognized by TINO's HTML exporter:
+
+```markdown
+- [ ] TODO
+- [/] DOING
+- [~] WAITING
+- [x] DONE
+- [-] CANCELLED
+```
+
+Standard Markdown renderers may not recognize `[/]`, `[~]` or `[-]`
+automatically. Add `checkbox.custom` to your render-markdown.nvim plugin options:
+
+```lua
+opts = {
+  checkbox = {
+    custom = {
+      doing = {
+        raw = "[/]",
+        rendered = "◐ ",
+        highlight = "DiagnosticInfo",
+      },
+      waiting = {
+        raw = "[~]",
+        rendered = "󰔟 ",
+        highlight = "DiagnosticWarn",
+      },
+      todo = { -- CANCELLED: override the built-in [-] entry.
+        raw = "[-]",
+        rendered = "󰜺 ",
+        highlight = "Comment",
+      },
+    },
+  },
+}
+```
+
+Replace the Nerd Font glyphs if needed. This only changes rendering; TINO's
+editing commands still use `[ ]` / `[x]` plus an explicit state token.
+
 ## Commands
 
-All fourteen commands are user commands. No mappings are created by default.
+All fifteen commands are user commands. No mappings are created by default.
 
 | Command | Description |
 | --- | --- |
@@ -160,6 +206,7 @@ All fourteen commands are user commands. No mappings are created by default.
 | `:TinoAgenda` | Open a read-only agenda of all tasks under `roots`, including due dates. |
 | `:TinoRefile` | Structurally move the current top-level task item (with nested content) to another file. |
 | `:TinoFiles` | Open a `.md` file discovered under the configured `roots` in the current window. |
+| `:TinoExportHtml` | Export the current Markdown buffer, including unsaved edits, to standalone HTML with TINO task badges. |
 
 ### Opening files: `:TinoFiles`
 
@@ -172,6 +219,29 @@ configured roots, no files, or a cancelled picker it simply does nothing. The
 chooser prefers a Snacks file picker when a usable Snacks provider is present
 and otherwise falls back to `vim.ui.select` with the same candidates, exactly
 like `:TinoRefile`.
+
+### HTML export: `:TinoExportHtml`
+
+`:TinoExportHtml` uses Pandoc to render a named Markdown buffer with inline CSS
+and distinct TODO, DOING, WAITING, DONE and CANCELLED badges. Priorities,
+`@due(...)` and `@done(...)` remain readable. Linked resources are embedded so
+the result is a single standalone HTML file.
+
+Choose the theme in setup:
+
+```lua
+require("tino").setup({
+  html_export = { theme = "auto" }, -- default; also "light" or "dark"
+})
+```
+
+`"auto"` follows the browser/system `prefers-color-scheme`; `"light"` and
+`"dark"` force that theme. Themes use inline CSS variables, without JavaScript.
+
+The export is written beside the source: `notes.md` becomes `notes.html`, then
+`notes-1.html`, `notes-2.html`, and so on if files already exist. The command
+reports the generated path; it never overwrites an existing export or saves or
+changes the Markdown buffer.
 
 ### Direct setters: `:TinoDone` and `:TinoTodo`
 
@@ -385,8 +455,8 @@ used (falling back to built-in defaults).
 
 ## Tests
 
-The suite is dependency-free and runs headless. All generated fixtures live
-under the gitignored `test/tmp/`.
+The Lua test harness runs headless; HTML export tests also require Pandoc.
+All generated fixtures live under the gitignored `test/tmp/`.
 
 ```sh
 nvim --headless -u NONE -i NONE -l test/run.lua
@@ -398,7 +468,8 @@ authoritative.
 ## Compatibility
 
 - Neovim 0.10+ recommended; tested on 0.12.5.
-- No external plugins, no shelling out, no network access.
-- Purely Markdown: no folding, preview, adapters, databases, indexes, or jobs.
-  Despite the name, TINO does **not** implement Org-mode: no outline tree, no
-  agenda clock, no properties drawer, no export engine, just Markdown tasks.
+- No external plugins or shell commands. Only HTML export invokes Pandoc;
+  embedding remote resources may require network access.
+- Purely Markdown: no folding, preview, adapters, databases, indexes, or
+  background jobs. Despite the name, TINO does **not** implement Org-mode:
+  no outline tree, no agenda clock, no properties drawer, just Markdown tasks.
