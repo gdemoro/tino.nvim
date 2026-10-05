@@ -53,23 +53,28 @@ The same repository holds the source: <https://github.com/gdemoro/tino.nvim>.
 
 ## Syntax
 
-A task line is (after optional horizontal-whitespace indentation):
+Tasks are Markdown list items with a checkbox/state marker, a state and some
+text. Priorities and dates are optional. These examples include the extended
+markers supported by HTML export and rendering:
 
-```
-<marker><ws>+<checkbox><ws>+<STATE>[ [#P]]<ws>+<description>[<ws>+<metadata>]*<ws>*
+```markdown
+- [ ] TODO [#A] Write the report @due(2026-10-10)
+- [/] DOING Run the new toxicity pipeline
+- [~] WAITING [#B] Review the results
+- [x] DONE Update the documentation @done(2026-10-05 12:30)
+- [-] CANCELLED Old task
 ```
 
-- **marker** – `-`, `*`, `+`, or one to nine digits followed by `.` or `)`
-  (ordered lists).
-- **checkbox** – `[ ]`, `[x]`, or `[X]`.
-- **STATE** – one configured uppercase token (`[A-Z][A-Z0-9_-]*`).
-- **priority** – an optional single configured uppercase letter cookie `[#A]`.
-- **description** – any non-empty text, including Unicode; embedded whitespace
-  is preserved.
-- **metadata** – an optional single `@due(YYYY-MM-DD)` deadline and/or single
-  `@done(YYYY-MM-DD HH:MM)` completion timestamp, at the end of the description
-  in either order. Gregorian dates (including leap years) and times are
-  validated. Embedded metadata-like prose followed by more text stays prose.
+- **list marker** – `-`, `*`, `+`, or numbered markers such as `1.` or `1)`.
+- **checkbox/state marker** – editing uses `[ ]` / `[x]` (`[X]` also works);
+  HTML export and rendering also recognize `[/]`, `[~]` and `[-]`.
+- **state** – a configured uppercase name, such as `TODO`, `DOING`, `WAITING`,
+  `DONE` or `CANCELLED`.
+- **optional priority** – `[#A]`, `[#B]` or `[#C]` before the description
+  (configurable).
+- **description** – the task's non-empty text, including Unicode.
+- **optional metadata** – trailing `@due(YYYY-MM-DD)` and/or
+  `@done(YYYY-MM-DD HH:MM)`, in either order; dates and times are validated.
 
 Plain Markdown checkboxes that are not tasks (for example `- [ ] buy milk` with
 no state token, or tasks inside fenced code blocks) are ignored. Lines are
@@ -170,12 +175,12 @@ opts = {
       },
       waiting = {
         raw = "[~]",
-        rendered = "󰔟 ",
+        rendered = "○ ",
         highlight = "DiagnosticWarn",
       },
       todo = { -- CANCELLED: override the built-in [-] entry.
         raw = "[-]",
-        rendered = "󰜺 ",
+        rendered = "× ",
         highlight = "Comment",
       },
     },
@@ -183,8 +188,8 @@ opts = {
 }
 ```
 
-Replace the Nerd Font glyphs if needed. This only changes rendering; TINO's
-editing commands still use `[ ]` / `[x]` plus an explicit state token.
+This only changes rendering; TINO's editing commands still use `[ ]` / `[x]`
+plus an explicit state token.
 
 ## Commands
 
