@@ -569,7 +569,8 @@ H.describe("refile.run", function()
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
     local orig = vim.ui.select
     vim.ui.select = function(items, _, cb)
-      H.eq(#items, 1)
+      H.eq(#items, 2)
+      H.eq(items[2], "Create new file...")
       cb(items[1])
     end
     local ret = refile.run()

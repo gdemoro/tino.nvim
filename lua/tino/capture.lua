@@ -154,9 +154,9 @@ function M.insert(inbox, config, text, priority, due_input)
   return true
 end
 
-function M.run()
+function M.run(destination)
   local config = require("tino").config
-  local inbox = config.inbox
+  local inbox = destination or config.inbox
   if type(inbox) ~= "string" or inbox == "" then
     notify("no inbox configured", vim.log.levels.ERROR)
     return
@@ -196,6 +196,16 @@ function M.run()
         M.insert(inbox, config, text, priority, due)
       end)
     end)
+  end)
+end
+
+function M.run_to()
+  require("tino.picker").select_destination(require("tino").config.roots, {
+    prompt = "Capture task to:",
+  }, function(path)
+    if path then
+      M.run(path)
+    end
   end)
 end
 

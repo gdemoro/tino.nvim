@@ -105,6 +105,7 @@ structural `TinoRefile` command.
 require("tino").setup({
   roots = { "~/notes", "~/work" }, -- directories scanned for .md files
   inbox = "~/notes/inbox.md",      -- target of TinoCapture
+  note_inbox = "~/notes/notes.md", -- target of TinoNote
   -- optional overrides:
   -- states = { "TODO", "DOING", "WAITING", "DONE", "CANCELLED" },
   -- priorities = { "A", "B", "C" },
@@ -128,10 +129,12 @@ require("tino").setup({
   path, or same device+inode+type, covering symlink and hard-link aliases)
   collapse to one deterministic representative.
 - `inbox` – file capture appends to.
+- `note_inbox` – file `:TinoNote` appends free-text notes to (no task
+  formatting).
 - `agenda.include_completed` – show completed states in the agenda.
 
-A leading literal `~/` in `roots` and `inbox` is expanded once using the
-process `$HOME`; spaces, `%`, `#`, wildcards, and buffer tokens are kept
+A leading literal `~/` in `roots`, `inbox`, and `note_inbox` is expanded once
+using the process `$HOME`; spaces, `%`, `#`, wildcards, and buffer tokens are kept
 literally. `TinoCycle` and `TinoPriority` establish fence eligibility
 through the same scan used by the agenda, so they ignore tasks inside fenced
 code blocks (and after an unclosed fence).
@@ -185,7 +188,7 @@ editing commands still use `[ ]` / `[x]` plus an explicit state token.
 
 ## Commands
 
-All ten commands are user commands. No mappings are created by default.
+All fifteen commands are user commands. No mappings are created by default.
 
 | Command | Description |
 | --- | --- |
@@ -196,9 +199,26 @@ All ten commands are user commands. No mappings are created by default.
 | `:TinoState` | Show a floating box of shortcuts (`t` TODO, `d` DOING, `w` WAITING, `x` DONE, `c` CANCELLED) and set the task directly to the chosen state on that keypress; `Esc` cancels, no Enter. |
 | `:TinoDue` | Prompt for a deadline on the current task; set/replace it, or remove it with empty input. |
 | `:TinoCapture` | Prompt for text, optional priority, then optional deadline, and append a task to the inbox buffer. |
+| `:TinoCaptureTo` | Prompt for text, optional priority, then optional deadline, and append the task to a chosen Markdown destination. |
+| `:TinoNote` | Prompt for free-text notes and append them verbatim to the configured `note_inbox` buffer. |
+| `:TinoNoteTo` | Prompt for free-text notes and append them verbatim to a chosen Markdown destination. |
+| `:TinoNoteRefile` | Move the visually selected lines to a chosen Markdown destination, then delete them from the source. |
 | `:TinoAgenda` | Open a read-only agenda of all tasks under `roots`, including due dates. |
 | `:TinoRefile` | Structurally move the current top-level task item (with nested content) to another file. |
+| `:TinoFiles` | Open a `.md` file discovered under the configured `roots` in the current window. |
 | `:TinoExportHtml` | Export the current Markdown buffer, including unsaved edits, to standalone HTML with TINO task badges. |
+
+### Opening files: `:TinoFiles`
+
+`:TinoFiles` lists every `.md` file discovered under the configured `roots`
+(nested files included, non-Markdown ignored) and opens the chosen one in the
+current window using native `:hide edit`, so an unsaved current buffer is kept
+(hidden, never discarded) and no split is created. It works from any buffer and
+cursor position, parses no task, and needs no `roots` fallback: with no
+configured roots, no files, or a cancelled picker it simply does nothing. The
+chooser prefers a Snacks file picker when a usable Snacks provider is present
+and otherwise falls back to `vim.ui.select` with the same candidates, exactly
+like `:TinoRefile`.
 
 ### HTML export: `:TinoExportHtml`
 
@@ -272,6 +292,43 @@ Empty due input creates a task without a deadline; cancelling aborts capture.
 There are no new configuration options, dependencies, calendar pickers,
 recurring tasks, scheduling or tags.
 
+### Notes: `:TinoNote`, `:TinoNoteTo`, `:TinoNoteRefile`
+
+Notes are plain free text: they are appended (or moved) byte-for-byte with no
+state, priority, deadline, or `@done(...)` interpretation.
+
+- `:TinoNote` prompts for text and appends it to the configured `note_inbox`.
+  Multiline input is split on newlines and each line is appended verbatim, so
+  Markdown syntax in a note is never rewritten.
+- `:TinoNoteTo` prompts for text, then asks for a destination instead of using
+  `note_inbox`. The destination uses the same chooser as `:TinoRefile`.
+- `:TinoNoteRefile` (visual mode, `<cmd>` from a range) copies the exact
+  selected lines to a destination, then removes them from the source. The
+  destination insertion happens first; the source lines are deleted only after
+  the insertion succeeds, so a failed move never loses the note. It requires a
+  real visual range and a modifiable source; without one it refuses.
+
+`Esc`/cancelling any prompt or the destination chooser is a no-op. As with
+every command, buffers are modified in place and **never saved
+automatically** — a newly created destination is an unsaved buffer you must
+`:write`.
+
+### Choosing a new destination
+
+The destination chooser for `:TinoNoteTo`, `:TinoNoteRefile`, `:TinoCaptureTo`,
+and `:TinoRefile` lists the discovered `.md` files and adds a literal
+`Create new file...` entry. Choosing it asks for a path:
+
+- enter a path **relative to a configured root**; leading/trailing whitespace
+  is trimmed, `\` is treated as `/`, and `.`/`..` components are collapsed.
+- an absolute path, a Windows drive path, or a `..` that escapes the root is
+  rejected, as is a name whose existing parent escapes the root or resolves
+  through a symlink outside it.
+- if the name has no `.md` suffix, `.md` is appended.
+- when more than one directory root is configured you pick the root first.
+- only missing parent directories are created; the new Markdown file itself is
+  loaded as a named, unsaved, listed buffer and is **not** written to disk.
+
 ### Example mappings (optional, your choice)
 
 ```lua
@@ -284,7 +341,16 @@ vim.keymap.set("n", "<leader>ta", "<cmd>TinoAgenda<cr>",   { desc = "tino: agend
 vim.keymap.set("n", "<leader>tr", "<cmd>TinoRefile<cr>",   { desc = "tino: refile" })
 vim.keymap.set("n", "<leader>ti", "<cmd>TinoCapture<cr>",  { desc = "tino: capture" })
 vim.keymap.set("n", "<leader>tu", "<cmd>TinoDue<cr>",      { desc = "tino: set due date" })
+vim.keymap.set(
+  "v",
+  "<leader>tR",
+  ":'<,'>TinoNoteRefile<cr>",
+  { desc = "tino: refile note selection" }
+)
 ```
+
+`TinoNoteRefile` must be invoked with a real Visual range, and Visual mappings
+should pass `'<,'>` explicitly.
 
 ## Timestamps
 
@@ -325,7 +391,11 @@ configured state order, showing state, priority, `file:line`, description and
 
 `:TinoRefile` moves the **top-level** task item under the cursor, including
 all of its nested lists, paragraphs, blank lines, and closed fenced code blocks,
-to another `.md` file chosen with `vim.ui.select` from the configured `roots`.
+to another `.md` file chosen from the recursively discovered `.md` candidates
+under the configured `roots`, or to a new file created through the chooser's
+`Create new file...` entry. The chooser prefers a Snacks file picker when a
+usable Snacks provider is present and otherwise falls back to `vim.ui.select`
+with the same candidates; no Snacks or AstroNvim dependency is required.
 
 It is the only command that requires Tree-sitter. It locates the `list_item`
 whose direct task marker exactly matches the task's row and checkbox margin,
@@ -346,7 +416,10 @@ then moves whole original lines untouched. `TinoRefile`:
 - excludes every physical alias of the source file (same resolved path, or
   same device+inode+type, which also covers hard links and symlinks), and
   refuses a destination that is later renamed, deleted, replaced by an alias of
-  the source, edited, or otherwise changed during the selection delay;
+  the source, edited, or otherwise changed during the selection delay; a
+  destination the user newly creates through `Create new file...` is instead
+  snapshotted after its unsaved buffer exists and is validated against that
+  empty state (an appearing on-disk file at that path aborts the move);
 - on failure restores the exact full pre-edit contents of **both** buffers,
   including a partially modified destination, and reports rollback failure
   honestly;

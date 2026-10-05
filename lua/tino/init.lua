@@ -10,6 +10,7 @@ M.config = {
   done_timestamp = true,
   roots = {},
   inbox = nil,
+  note_inbox = nil,
   agenda = { include_completed = false },
   html_export = { theme = "auto" },
 }
@@ -149,6 +150,17 @@ function M.setup(opts)
     inbox = p
   end
 
+  local note_inbox = cfg.note_inbox
+  if opts.note_inbox ~= nil then
+    if type(opts.note_inbox) ~= "string" then
+      return err("invalid note_inbox: expected a path string")
+    end
+    note_inbox = files.normalize(opts.note_inbox)
+    if not note_inbox then
+      return err("invalid note_inbox path: " .. tostring(opts.note_inbox))
+    end
+  end
+
   local agenda = cfg.agenda or { include_completed = false }
   if opts.agenda ~= nil then
     if type(opts.agenda) ~= "table" then
@@ -182,6 +194,7 @@ function M.setup(opts)
   cfg.done_timestamp = done_timestamp
   cfg.roots = roots
   cfg.inbox = inbox
+  cfg.note_inbox = note_inbox
   cfg.agenda = agenda
   cfg.html_export = html_export
 
@@ -229,11 +242,25 @@ function M._register_commands()
     require("tino.task").prompt_due(0, current_row())
   end, { desc = "tino: set or remove task deadline" })
 
+  vim.api.nvim_create_user_command("TinoNoteTo", function()
+    require("tino.note").run_to()
+  end, { desc = "tino: append a note to a Markdown destination" })
+
+  vim.api.nvim_create_user_command("TinoNoteRefile", function(opts)
+    require("tino.note").refile(opts)
+  end, { range = true, desc = "tino: move visually selected lines" })
+
+  vim.api.nvim_create_user_command("TinoCaptureTo", function()
+    require("tino.capture").run_to()
+  end, { desc = "tino: capture a task to a Markdown destination" })
+
   local lazy = {
+    TinoNote = "tino.note",
     TinoCapture = "tino.capture",
     TinoAgenda = "tino.agenda",
     TinoRefile = "tino.refile",
     TinoExportHtml = "tino.export",
+    TinoFiles = "tino.picker",
   }
   for name, mod in pairs(lazy) do
     vim.api.nvim_create_user_command(name, function()

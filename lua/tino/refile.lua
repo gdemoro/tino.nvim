@@ -10,6 +10,7 @@
 
 local parser = require("tino.parser")
 local files = require("tino.files")
+local picker = require("tino.picker")
 local M = {}
 
 local uv = vim.uv or vim.loop
@@ -488,14 +489,20 @@ local function validate_dest(destbuf, destpath, dsnap, src_real)
     return false, "destination renamed since selection"
   end
   local st = uv.fs_stat(real)
-  if not st then
-    return false, "destination file was replaced since selection"
-  end
-  if dsnap.dev ~= nil and st.dev ~= dsnap.dev then
-    return false, "destination file was replaced since selection"
-  end
-  if dsnap.ino ~= nil and st.ino ~= dsnap.ino then
-    return false, "destination file was replaced since selection"
+  if dsnap.new then
+    if st then
+      return false, "new destination appeared on disk since selection"
+    end
+  else
+    if not st then
+      return false, "destination file was replaced since selection"
+    end
+    if dsnap.dev ~= nil and st.dev ~= dsnap.dev then
+      return false, "destination file was replaced since selection"
+    end
+    if dsnap.ino ~= nil and st.ino ~= dsnap.ino then
+      return false, "destination file was replaced since selection"
+    end
   end
   if dsnap.loaded then
     if dsnap.buf and destbuf ~= dsnap.buf then
@@ -532,6 +539,9 @@ end
 -- physical non-identity and newly divergent loaded aliases.
 -- Returns (true) or (false, reason).
 function M.final_validate(srcbuf, snap, destbuf, dsnap, destpath)
+  if srcbuf == destbuf then
+    return false, "destination is the source (or an alias of it)"
+  end
   local oks, sreason = validate_source(srcbuf, snap)
   if not oks then
     return false, sreason
@@ -679,7 +689,7 @@ function M.run()
   for _, e in ipairs(errors or {}) do
     notify("root " .. e.path .. ": " .. tostring(e.message), vim.log.levels.WARN)
   end
-  if #list == 0 then
+  if #list == 0 and #(config.roots or {}) == 0 then
     notify("no destination files under configured roots", vim.log.levels.WARN)
     return false
   end
@@ -695,13 +705,18 @@ function M.run()
       choices[#choices + 1] = f
     end
   end
-  if #choices == 0 then
-    notify("no usable destination files under configured roots", vim.log.levels.WARN)
-    return false
-  end
-  vim.ui.select(choices, { prompt = "Refile task to:" }, function(choice)
+  picker.select_destination(config.roots, { paths = choices, prompt = "Refile task to:" }, function(choice, created)
     if not choice then
       return
+    end
+    if created then
+      local dsnap, err = M.snapshot_dest(choice)
+      if not dsnap then
+        notify(err, vim.log.levels.WARN)
+        return
+      end
+      dsnap.new = true
+      snap.dests[choice] = dsnap
     end
     local ok, reason = M.commit(srcbuf, row, taskline, first, last, snap, choice)
     if not ok then
