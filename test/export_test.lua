@@ -48,6 +48,28 @@ local function count(s, pat)
   return n
 end
 
+-- Run `fn` against a fresh default config set up with `opts`, then restore the
+-- previous config so theme tests do not leak into the rest of the file.
+local function with_theme(opts, fn)
+  local saved = md.config
+  md.config = {
+    states = { "TODO", "DOING", "WAITING", "DONE", "CANCELLED" },
+    priorities = { "A", "B", "C" },
+    completed_states = { DONE = true, CANCELLED = true },
+    done_timestamp = true,
+    roots = {},
+    inbox = nil,
+  }
+  vim.g.tino_commands_registered = nil
+  local ok = md.setup(opts)
+  local ran, out, notes = pcall(fn)
+  md.config = saved
+  if not ran then
+    error(out, 2)
+  end
+  return ok, out, notes
+end
+
 H.describe("TinoExportHtml command", function()
   H.it("is registered by setup", function()
     vim.g.tino_commands_registered = nil
@@ -229,5 +251,69 @@ H.describe("HTML export", function()
     H.eq(ret, nil, "run returns nil")
     H.assert(notes[1] and notes[1].level == vim.log.levels.ERROR, "error notice, no success")
     H.eq(uv.fs_stat(dir .. "/notes.html"), nil, "no output written")
+  end)
+
+  H.it("defaults to auto theme and follows prefers-color-scheme in CSS", function()
+    local dir = util.reset("export_theme_auto")
+    local buf = new_buf(dir, "auto.md", "# Auto\n\n- [ ] TODO a\n\n> quote\n\n`c`\n")
+    local stored
+    local ok, out = with_theme(nil, function()
+      stored = md.config.html_export.theme
+      return run_on(buf)
+    end)
+    H.eq(ok, true, "setup succeeds with default theme")
+    H.eq(stored, "auto", "config defaults to auto")
+
+    local html = util.read(out)
+    H.assert(html:find('data-theme="auto"', 1, true), "auto mode exposed")
+    H.assert(html:find("@media (prefers-color-scheme: dark)", 1, true), "dark follows OS preference")
+    H.assert(html:find("color-scheme:light dark", 1, true), "declares both schemes")
+    H.assert(html:find("--tino-bg:#ffffff", 1, true), "light palette is the default")
+    H.assert(html:find("--tino-bg:#0d1117", 1, true), "dark palette emitted in media query")
+    H.assert(html:find(".tino-state-todo{color:var(--tino-todo-fg);background:var(--tino-todo-bg)}", 1, true),
+      "badges consume palette variables")
+    H.assert(html:find("th,td{border:1px solid var(--tino-border)", 1, true), "tables consume palette variables")
+    H.assert(not html:find("<script", 1, true), "no JS for theme switching")
+    H.assert(not html:find("<link", 1, true), "no remote stylesheet")
+  end)
+
+  H.it("honors an explicit light theme with fixed colors", function()
+    local dir = util.reset("export_theme_light")
+    local buf = new_buf(dir, "light.md", "# Light\n\n- [ ] TODO a\n")
+    local stored
+    local ok, out = with_theme({ html_export = { theme = "light" } }, function()
+      stored = md.config.html_export.theme
+      return run_on(buf)
+    end)
+    H.eq(ok, true, "setup accepts light theme")
+    H.eq(stored, "light", "light theme stored")
+
+    local html = util.read(out)
+    H.assert(html:find('data-theme="light"', 1, true), "light mode exposed")
+    H.assert(html:find("color-scheme:light", 1, true), "native surfaces use light scheme")
+    H.assert(html:find("--tino-bg:#ffffff", 1, true), "light palette applied")
+    H.assert(html:find("--tino-cancelled-bg:#ffebe9", 1, true), "full light palette present")
+    H.assert(not html:find("prefers-color-scheme", 1, true), "no preference override")
+    H.assert(not html:find("#0d1117", 1, true), "dark palette not emitted")
+  end)
+
+  H.it("honors an explicit dark theme regardless of OS preference", function()
+    local dir = util.reset("export_theme_dark")
+    local buf = new_buf(dir, "dark.md", "# Dark\n\n- [ ] TODO a\n")
+    local stored
+    local ok, out = with_theme({ html_export = { theme = "dark" } }, function()
+      stored = md.config.html_export.theme
+      return run_on(buf)
+    end)
+    H.eq(ok, true, "setup accepts dark theme")
+    H.eq(stored, "dark", "dark theme stored")
+
+    local html = util.read(out)
+    H.assert(html:find('data-theme="dark"', 1, true), "dark mode exposed")
+    H.assert(html:find("color-scheme:dark", 1, true), "native surfaces use dark scheme")
+    H.assert(html:find("--tino-bg:#0d1117", 1, true), "dark palette applied")
+    H.assert(html:find("--tino-cancelled-bg:#4c1111", 1, true), "full dark palette present")
+    H.assert(not html:find("prefers-color-scheme", 1, true), "no preference override")
+    H.assert(not html:find("#ffffff", 1, true), "light palette not emitted")
   end)
 end)

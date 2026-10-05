@@ -45,25 +45,114 @@ local STATE_CLASS = {
   CANCELLED = "tino-state-cancelled",
 }
 
-M.css = table.concat({
-  "body{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Helvetica,Arial,sans-serif;line-height:1.55;max-width:52rem;margin:2rem auto;padding:0 1rem;color:#1f2328}",
+-- Theme palettes. One light and one shared dark palette; every theme-
+-- sensitive color is consumed through a CSS variable so the generated
+-- document stays a single self-contained file with no JS, remote styles or
+-- libraries. `auto` starts from the light palette and swaps in the dark one
+-- inside a prefers-color-scheme media query.
+local LIGHT = {
+  ["--tino-bg"] = "#ffffff",
+  ["--tino-fg"] = "#1f2328",
+  ["--tino-muted"] = "#57606a",
+  ["--tino-link"] = "#0969da",
+  ["--tino-border"] = "#d0d7de",
+  ["--tino-code-bg"] = "#f0f1f3",
+  ["--tino-pre-bg"] = "#f6f8fa",
+  ["--tino-todo-fg"] = "#57606a",
+  ["--tino-todo-bg"] = "#eaeef2",
+  ["--tino-doing-fg"] = "#0550ae",
+  ["--tino-doing-bg"] = "#ddf4ff",
+  ["--tino-waiting-fg"] = "#9a6700",
+  ["--tino-waiting-bg"] = "#fff8c5",
+  ["--tino-done-fg"] = "#1a7f37",
+  ["--tino-done-bg"] = "#dafbe1",
+  ["--tino-cancelled-fg"] = "#cf222e",
+  ["--tino-cancelled-bg"] = "#ffebe9",
+}
+
+local DARK = {
+  ["--tino-bg"] = "#0d1117",
+  ["--tino-fg"] = "#e6edf3",
+  ["--tino-muted"] = "#9198a1",
+  ["--tino-link"] = "#4493f8",
+  ["--tino-border"] = "#3d444d",
+  ["--tino-code-bg"] = "#161b22",
+  ["--tino-pre-bg"] = "#161b22",
+  ["--tino-todo-fg"] = "#9198a1",
+  ["--tino-todo-bg"] = "#21262d",
+  ["--tino-doing-fg"] = "#79c0ff",
+  ["--tino-doing-bg"] = "#0c2d6b",
+  ["--tino-waiting-fg"] = "#e3b341",
+  ["--tino-waiting-bg"] = "#3b2e00",
+  ["--tino-done-fg"] = "#56d364",
+  ["--tino-done-bg"] = "#033a16",
+  ["--tino-cancelled-fg"] = "#ff7b72",
+  ["--tino-cancelled-bg"] = "#4c1111",
+}
+
+local function var_block(palette)
+  local names = {}
+  for name in pairs(palette) do
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  local out = {}
+  for _, name in ipairs(names) do
+    out[#out + 1] = name .. ":" .. palette[name]
+  end
+  return table.concat(out, ";")
+end
+
+-- Common rules shared by every theme; all colors flow through variables.
+local RULES = {
+  "body{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Helvetica,Arial,sans-serif;line-height:1.55;max-width:52rem;margin:2rem auto;padding:0 1rem;background:var(--tino-bg);color:var(--tino-fg)}",
   "h1,h2,h3,h4{line-height:1.25}",
-  "a{color:#0969da}",
-  "code{background:#f0f1f3;padding:.1em .3em;border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}",
-  "pre{background:#f6f8fa;padding:.8rem 1rem;border-radius:6px;overflow:auto}",
+  "a{color:var(--tino-link)}",
+  "code{background:var(--tino-code-bg);padding:.1em .3em;border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}",
+  "pre{background:var(--tino-pre-bg);padding:.8rem 1rem;border-radius:6px;overflow:auto}",
   "pre code{background:none;padding:0}",
   "table{border-collapse:collapse;margin:1rem 0}",
-  "th,td{border:1px solid #d0d7de;padding:.35rem .6rem}",
-  "blockquote{border-left:4px solid #d0d7de;margin:1rem 0;padding:0 1rem;color:#57606a}",
+  "th,td{border:1px solid var(--tino-border);padding:.35rem .6rem}",
+  "blockquote{border-left:4px solid var(--tino-border);margin:1rem 0;padding:0 1rem;color:var(--tino-muted)}",
   ".tino-state{display:inline-block;font-size:.78em;font-weight:600;letter-spacing:.02em;padding:.05em .5em;margin-right:.35em;border-radius:1em;border:1px solid currentColor;vertical-align:baseline}",
-  ".tino-state-todo{color:#57606a;background:#eaeef2}",
-  ".tino-state-doing{color:#0550ae;background:#ddf4ff}",
-  ".tino-state-waiting{color:#9a6700;background:#fff8c5}",
-  ".tino-state-done{color:#1a7f37;background:#dafbe1}",
-  ".tino-state-cancelled{color:#cf222e;background:#ffebe9;text-decoration:line-through}",
-  ".tino-state-other{color:#57606a;background:#eaeef2}",
-  "",
-}, "\n")
+  ".tino-state-todo{color:var(--tino-todo-fg);background:var(--tino-todo-bg)}",
+  ".tino-state-doing{color:var(--tino-doing-fg);background:var(--tino-doing-bg)}",
+  ".tino-state-waiting{color:var(--tino-waiting-fg);background:var(--tino-waiting-bg)}",
+  ".tino-state-done{color:var(--tino-done-fg);background:var(--tino-done-bg)}",
+  ".tino-state-cancelled{color:var(--tino-cancelled-fg);background:var(--tino-cancelled-bg);text-decoration:line-through}",
+  ".tino-state-other{color:var(--tino-todo-fg);background:var(--tino-todo-bg)}",
+}
+
+-- Build the inline stylesheet for a resolved theme ("auto", "light", "dark").
+local function build_css(theme)
+  local parts = {}
+  if theme == "dark" then
+    parts[#parts + 1] = ":root{color-scheme:dark;" .. var_block(DARK) .. "}"
+  elseif theme == "light" then
+    parts[#parts + 1] = ":root{color-scheme:light;" .. var_block(LIGHT) .. "}"
+  else
+    parts[#parts + 1] = ":root{color-scheme:light dark;" .. var_block(LIGHT) .. "}"
+    parts[#parts + 1] = "@media (prefers-color-scheme: dark){:root{" .. var_block(DARK) .. "}}"
+  end
+  for _, rule in ipairs(RULES) do
+    parts[#parts + 1] = rule
+  end
+  return table.concat(parts, "\n") .. "\n"
+end
+
+-- Resolve the configured export theme, defaulting to "auto" when the option
+-- is absent (e.g. tests that replace M.config) or set to an unknown value.
+local function export_theme()
+  local ok, init = pcall(require, "tino")
+  if ok and type(init) == "table" and type(init.config) == "table"
+    and type(init.config.html_export) == "table" then
+    local theme = init.config.html_export.theme
+    if theme == "light" or theme == "dark" then
+      return theme
+    end
+  end
+  return "auto"
+end
 
 local function html_escape(s)
   return (tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"))
@@ -211,16 +300,16 @@ local function run_pandoc(args, stdin, dir)
   return res.stdout or ""
 end
 
-local function wrap(body, title)
+local function wrap(body, title, theme)
   return table.concat({
     "<!DOCTYPE html>",
-    '<html lang="en">',
+    '<html lang="en" data-theme="' .. theme .. '">',
     "<head>",
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     "<title>" .. html_escape(title) .. "</title>",
     "<style>",
-    M.css,
+    build_css(theme),
     "</style>",
     "</head>",
     "<body>",
@@ -319,7 +408,7 @@ function M.export_buffer(buf)
     return nil, ferr
   end
 
-  return write_exclusive(dir, base, wrap(fragment, base))
+  return write_exclusive(dir, base, wrap(fragment, base, export_theme()))
 end
 
 -- Command entry point: export the current buffer and report the result.

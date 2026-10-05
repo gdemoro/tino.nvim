@@ -11,6 +11,7 @@ M.config = {
   roots = {},
   inbox = nil,
   agenda = { include_completed = false },
+  html_export = { theme = "auto" },
 }
 
 local function is_list_of_strings(v)
@@ -159,6 +160,18 @@ function M.setup(opts)
     agenda = { include_completed = opts.agenda.include_completed == true }
   end
 
+  local html_export = cfg.html_export or { theme = "auto" }
+  if opts.html_export ~= nil then
+    if type(opts.html_export) ~= "table" then
+      return err("invalid html_export: expected a table")
+    end
+    local theme = opts.html_export.theme
+    if theme ~= nil and theme ~= "auto" and theme ~= "light" and theme ~= "dark" then
+      return err([[invalid html_export.theme: expected "auto", "light" or "dark"]])
+    end
+    html_export = { theme = theme or "auto" }
+  end
+
   if completed[states[1]] then
     return err("first configured state must be an active (non-completed) state")
   end
@@ -170,6 +183,7 @@ function M.setup(opts)
   cfg.roots = roots
   cfg.inbox = inbox
   cfg.agenda = agenda
+  cfg.html_export = html_export
 
   M._register_commands()
   local ok, hl = pcall(require, "tino.highlight")

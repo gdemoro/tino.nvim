@@ -207,6 +207,17 @@ and distinct TODO, DOING, WAITING, DONE and CANCELLED badges. Priorities,
 `@due(...)` and `@done(...)` remain readable. Linked resources are embedded so
 the result is a single standalone HTML file.
 
+Choose the theme in setup:
+
+```lua
+require("tino").setup({
+  html_export = { theme = "auto" }, -- default; also "light" or "dark"
+})
+```
+
+`"auto"` follows the browser/system `prefers-color-scheme`; `"light"` and
+`"dark"` force that theme. Themes use inline CSS variables, without JavaScript.
+
 The export is written beside the source: `notes.md` becomes `notes.html`, then
 `notes-1.html`, `notes-2.html`, and so on if files already exist. The command
 reports the generated path; it never overwrites an existing export or saves or
